@@ -19,7 +19,8 @@ Input data:
  - test run duration (optional)
  - action vector (optional)
  - seed (optional)
- - fuzzing type
+ - fuzzing type (optional)
+ - qemu-img arguments (optional)
 
 
 Fuzzer requirements:
@@ -49,16 +50,19 @@ Fuzzer requirements:
 13. Pool of actions should be defined automatically based on an image template
 14. Should accept a fuzzing type: random values or pregenerated ones
     (if possible).
-15. Should accept a test run duration as an argument. Tests should be executed
+15. Should accept qemu-img call parameters as an argument and select them
+    randomly otherwise. As far as it's expected to be rarely changed, the list
+    of possible values will be available in the test runner internally.
+16. Should accept a test run duration as an argument. Tests should be executed
     during a minimum period from a test run duration and time while fuzzer can
     generate different test images
-16. Should support an external cancelation of a test run
-17. Seed, action vector and fuzzing type should be logged (for regression
+17. Should support an external cancellation of a test run
+18. Seed, action vector and fuzzing type should be logged (for regression
     purpose)
-18. All files related to test result should be collected: a test image,
+19. All files related to test result should be collected: a test image,
     qemu logs, fuzzer logs and crash dumps
-19. Should be compatible with python version 2.4-2.7
-20. Usage of external libraries should be limited as much as possible.
+20. Should be compatible with python version 2.4-2.7
+21. Usage of external libraries should be limited as much as possible.
 
 
 Image formats:
@@ -87,7 +91,7 @@ Glossary:
 
 Action vector is a sequence of structure elements retrieved from an image
 format, each of which will be fuzzed for the test image. It's a subset of
-elements of the action pool.
+elements of the action pool. Example: header, refcount block, etc.
 Action pool is all available elements of an image structure that generated
 automatically from an image template.
 Image template is a formal description of an image structure and relations
