@@ -2,13 +2,11 @@ import sys, os, signal
 import qcow2
 from time import gmtime, strftime
 import subprocess
+from shutil import rmtree
 # -----For local test environment only
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
 # -----
-#TODO: Replace 'except as' with a general format for py 2.4-2.7
-#TODO: Replace 'with' by a safe destructor
-
 
 def multilog(msg, *output):
     """ Write an object to all of specified file descriptors
@@ -32,16 +30,19 @@ def str_signal(sig):
 class testEnv(object):
     """ Trivial test object
 
-    The class sets up test environment, generate a test image and executes
-    qemu_img with specified arguments and generated image provided. All logs
+    The class sets up test environment, generates a test image and executes
+    qemu_img with specified arguments and a test image provided. All logs
     are collected.
+    Summary log will contain short descriptions and statuses of all tests in
+    a run.
+    Test log will include application ('qemu-img') logs besides info sent
+    to the summary log.
     """
-
-    def __init__(self, work_dir, exec_bin=None):
+    def __init__(self, work_dir, run_log, exec_bin=None):
         """Set test environment in a specified work directory.
 
         Path to qemu_img will be retrieved from 'QEMU_IMG' environment
-        variable, if it's not specified.
+        variable, if not specified.
         """
 
         self.init_path = os.getcwd()
@@ -56,19 +57,19 @@ class testEnv(object):
 
         try:
             os.makedirs(self.current_dir)
-        except OSError as e:
+        except OSError:
+            e = sys.exc_info()[1]
             print >>sys.stderr, 'Error: The working directory cannot be used.'\
-                'Reason: ', os.strerror(e[1])
-            raise
+                ' Reason: %s' %e[1]
+            raise Exception('Internal error')
 
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
-
+        self.parent_log = open(run_log, "a")
+        self.result = False
 
     def _qemu_img(self, *args):
         """ Start qemu_img with specified arguments and return an exit code or
-        kill signal depending on result of an execution.
-
-        'qemu_img' logs are collected to a file.
+        a kill signal depending on result of an execution.
         """
 
         devnull = open('/dev/null', 'r+')
@@ -81,39 +82,40 @@ class testEnv(object):
         """ Execute a test.
 
         The method creates a test image, runs 'qemu_img' and analyzes its exit
-        code.
+        status. If the application was killed by a signal, the test is marked
+        as failed.
         """
         os.chdir(self.current_dir)
         seed = qcow2.create_image('test_image.qcow2', 4*512)
-        multilog("Seed: {0}\nTest directory: {1}\n".format(seed, \
-                    self.current_dir), sys.stdout, self.log)
+        multilog("Seed: %s\nTest directory: %s\n" %(seed, self.current_dir),\
+                 sys.stdout, self.log, self.parent_log)
         try:
             retcode = self._qemu_img(*args)
-        except OSError as e:
-            multilog("Error: Test terminated. Reason: {0}\n"\
-                     .format(e[1]), sys.stderr, self.log)
+        except OSError:
+            e = sys.exc_info()[1]
+            multilog("Error: Start of 'qemu_img' failed. Reason: %s\n"\
+                     %e[1], sys.stderr, self.log, self.parent_log)
             raise Exception('Internal error')
 
         if retcode < 0:
-            multilog('FAIL: Test terminated by signal {0}\n'
-                        .format(str_signal(-retcode)), sys.stderr, self.log)
+            multilog('FAIL: Test terminated by signal %s\n'
+                     %str_signal(-retcode), sys.stderr, self.log, \
+                     self.parent_log)
         else:
-            multilog("PASS: Application exited with the status '{0}'\n"
-                        .format(os.strerror(retcode)), sys.stdout, self.log)
+            multilog("PASS: Application exited with the code '%d'\n"
+                        %retcode, sys.stdout, self.log, self.parent_log)
+            self.result = True
 
-
-    def __enter__(self):
-        """ Return an instance for 'with' statement
-        """
-
-        return self
-
-
-    def __exit__(self, *args):
-        """ Restore environment after a test execution
+    def finish(self):
+        """ Restore environment after a test execution. Remove folders of
+        passed tests
         """
         self.log.close()
+        self.parent_log.close()
         os.chdir(self.init_path)
+        if self.result:
+            rmtree(self.current_dir)
+
 
 if __name__ == '__main__':
 
@@ -121,12 +123,29 @@ if __name__ == '__main__':
         print('Usage: runner.py "/path/to/work/dir"')
         sys.exit(1)
     else:
+        work_dir = sys.argv[1]
+        # run_log created in 'main', because multiple tests are expected to \
+        # log in it
+        run_log = os.path.join(work_dir, 'run_' + \
+                               strftime("%Y_%m_%d_%H-%M", gmtime()) + '.log')
         try:
-            with testEnv(sys.argv[1]) as test:
-                test.execute('check')
-        #Silent exit on user break
-        except (KeyboardInterrupt, SystemExit):
-            sys.exit(1)
-        except Exception as e:
+            test = testEnv(work_dir, run_log)
+        except Exception:
+            e = sys.exc_info()[1]
             print("FAIL: %s"  %e)
             sys.exit(1)
+
+        # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
+        # block
+        try:
+            try:
+                test.execute('check')
+                #Silent exit on user break
+            except (KeyboardInterrupt, SystemExit):
+                sys.exit(1)
+            except Exception:
+                e = sys.exc_info()[1]
+                print("FAIL: %s"  %e)
+                sys.exit(1)
+        finally:
+            test.finish()
