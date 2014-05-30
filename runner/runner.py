@@ -3,6 +3,7 @@ import qcow2
 from time import gmtime, strftime
 import subprocess
 from shutil import rmtree
+import getopt
 # -----For local test environment only
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
@@ -38,7 +39,7 @@ class testEnv(object):
     Test log will include application ('qemu-img') logs besides info sent
     to the summary log.
     """
-    def __init__(self, work_dir, run_log, exec_bin=None):
+    def __init__(self, work_dir, run_log, exec_bin=None, cleanup=True):
         """Set test environment in a specified work directory.
 
         Path to qemu_img will be retrieved from 'QEMU_IMG' environment
@@ -50,7 +51,7 @@ class testEnv(object):
         self.current_dir = os.path.join(work_dir, strftime("%Y_%m_%d_%H-%M-%S",
                                                            gmtime()))
         if exec_bin is not None:
-            self.exec_bin = exec_bin
+            self.exec_bin = exec_bin.strip().split(' ')
         else:
             self.exec_bin = os.environ.get('QEMU_IMG', 'qemu-img').strip()\
             .split(' ')
@@ -66,19 +67,20 @@ class testEnv(object):
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
         self.parent_log = open(run_log, "a")
         self.result = False
+        self.cleanup = cleanup
 
-    def _qemu_img(self, *args):
+    def _qemu_img(self, q_args):
         """ Start qemu_img with specified arguments and return an exit code or
         a kill signal depending on result of an execution.
         """
-
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(self.exec_bin + list(args) +
+        return subprocess.call(self.exec_bin \
+                               + q_args +
                                ['test_image.qcow2'], stdin=devnull,
                                stdout=self.log, stderr=self.log)
 
 
-    def execute(self, *args):
+    def execute(self, q_args):
         """ Execute a test.
 
         The method creates a test image, runs 'qemu_img' and analyzes its exit
@@ -87,10 +89,11 @@ class testEnv(object):
         """
         os.chdir(self.current_dir)
         seed = qcow2.create_image('test_image.qcow2', 4*512)
-        multilog("Seed: %s\nTest directory: %s\n" %(seed, self.current_dir),\
+        multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"\
+                 %(seed, " ".join(q_args), self.current_dir),\
                  sys.stdout, self.log, self.parent_log)
         try:
-            retcode = self._qemu_img(*args)
+            retcode = self._qemu_img(q_args)
         except OSError:
             e = sys.exc_info()[1]
             multilog("Error: Start of 'qemu_img' failed. Reason: %s\n"\
@@ -111,41 +114,88 @@ class testEnv(object):
         passed tests
         """
         self.log.close()
+        # Delimiter between tests
+        self.parent_log.write("\n")
         self.parent_log.close()
         os.chdir(self.init_path)
-        if self.result:
+        if self.result and self.cleanup:
             rmtree(self.current_dir)
-
 
 if __name__ == '__main__':
 
-    if not len(sys.argv) == 2:
-        print('Usage: runner.py "/path/to/work/dir"')
+    def usage():
+        print( """
+        Usage: runner.py [OPTION...] DIRECTORY
+
+        Set up test environment in DIRECTORY and run a test in it.
+
+        Optional arguments:
+          -h, --help           display this help and exit
+          -c, --command=STRING execute qemu-img with arguments specified,
+                               by default STRING="check"
+          -b, --binary=PATH    path to the application under test, by default
+                               "qemu-img" in PATH or QEMU_IMG environment
+                               variables
+          -k, --keep_passed    don't remove folders of passed tests
+        """)
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], 'c:hb:k',
+                                   ['command=', 'help', 'binary=',
+                                    'keep_passed'])
+    except getopt.error:
+        e = sys.exc_info()[1]
+        print('Error: %s\n\nTry runner.py --help.' %e)
         sys.exit(1)
-    else:
-        work_dir = sys.argv[1]
-        # run_log created in 'main', because multiple tests are expected to \
-        # log in it
-        run_log = os.path.join(work_dir, 'run_' + \
-                               strftime("%Y_%m_%d_%H-%M", gmtime()) + '.log')
+
+    if len(sys.argv)==1:
+        usage()
+        sys.exit(1)
+
+    command = ['check']
+    cleanup = True
+    test_bin = None
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            usage()
+            sys.exit()
+        elif opt in ('-c', '--command'):
+            command = arg.split(" ")
+        elif opt in ('-k', '--keep_passed'):
+            cleanup = False
+        elif opt in ('-b', '--binary'):
+            test_bin = arg
+
+    if not len(args) == 1:
+        print 'Error: required parameter "DIRECTORY" missed'
+        usage()
+        sys.exit(1)
+
+    work_dir = args[0]
+    # run_log created in 'main', because multiple tests are expected to \
+    # log in it
+    # TODO: Make unique run_log names on every run (for one test per run
+    # this functionality is omitted in favor of usability)
+    run_log = os.path.join(work_dir, 'run.log')
+
+    try:
+        test = testEnv(work_dir, run_log, test_bin, cleanup)
+    except:
+        e = sys.exc_info()[1]
+        print("FAIL: %s"  %e)
+        sys.exit(1)
+
+    # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
+    # block
+    try:
         try:
-            test = testEnv(work_dir, run_log)
-        except Exception:
+            test.execute(command)
+            #Silent exit on user break
+        except (KeyboardInterrupt, SystemExit):
+            sys.exit(1)
+        except:
             e = sys.exc_info()[1]
             print("FAIL: %s"  %e)
             sys.exit(1)
-
-        # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
-        # block
-        try:
-            try:
-                test.execute('check')
-                #Silent exit on user break
-            except (KeyboardInterrupt, SystemExit):
-                sys.exit(1)
-            except Exception:
-                e = sys.exc_info()[1]
-                print("FAIL: %s"  %e)
-                sys.exit(1)
-        finally:
-            test.finish()
+    finally:
+        test.finish()
