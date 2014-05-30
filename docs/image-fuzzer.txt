@@ -1,16 +1,39 @@
-I've chosen a model-based fuzzer and qcow2 as a target image format.
-Rationale for first one can be found below. qcow2 format was selected because
-it's the native format of QEMU.
+Image fuzzer
+============
 
-Table of contents:
+Description
+-----------
 
- - Input data
- - Fuzzer requirements
- - Image formats
- - Effectiveness
- - Glossary
- - Schedule
+The goal of the image fuzzer is to catch crashes of qemu-io/qemu-img providing
+to them randomly corrupted images.
+Test images are generated from scratch and have valid inner structure with some
+elements, e.g. L1/L2 tables, having random invalid values.
 
+
+Test runner
+------
+
+The test runner generates a test image, executes one test, indicates its result
+and collect all test related artefacts (logs, core dumps, test image). The test
+is one start of a test binary, e.g. qemu-io, with specified arguments and one
+test image.
+Path to a test binary can be specified via environment variables (for now only
+qemu-img). For details see qemu-iotests/check.
+
+
+Module interfaces
+-----------------
+
+* Test runner/image generator
+
+The runner calls an image generator specifying test image file, size and seed.
+An image generator is expected to create a test image of a specified size using
+a specified seed for random generator and write an image to a file. A file
+should be created if it doesn't exist or overwritten otherwise. Size and seed
+arguments are optional.
+
+Overall fuzzer requirements
+===========================
 
 Input data:
 ----------
@@ -98,22 +121,3 @@ Image template is a formal description of an image structure and relations
 between image blocks
 Test image is an output image of fuzzer defined by the current seed, fuzz type
 and action vector.
-
-
-Schedule:
---------
-
-1 week - search and evaluation of suitable fuzzing instruments (libraries,
-         frameworks, etc)
-3 weeks - simple fuzzer that accepts a monolithic image structure, including
-          wrapper that generates sample images to be fuzzed.
-2 weeks - support of header fuzzing
-1.5 weeks - support of first level tables
-1 week - support of second level tables
-1.5 weeks - testing and optimization (ratio of valid/invalid images, time of
-            one test execution, effectiveness of algorithm of selection from
-            action pool, etc)
-
-Two weeks are left as a buffer, that can be spent on completion of an
-incorrectly estimated task or on implementation of additional features,
-e.g. snapshots.
