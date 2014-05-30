@@ -1,6 +1,6 @@
 import struct
 
-def create_image(name, size, seed=None):
+def create_image(name, seed=None, size=4*512):
     '''Create a fully-allocated raw image with sector markers
     Note: The function is temporarily copy-pasted from iotests.py
     '''
