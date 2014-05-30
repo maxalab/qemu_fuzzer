@@ -98,7 +98,7 @@ class testEnv(object):
                                stdout=self.log, stderr=self.log)
 
 
-    def execute(self, q_args):
+    def execute(self, q_args, seed):
         """ Execute a test.
 
         The method creates a test image, runs 'qemu_img' and analyzes its exit
@@ -106,7 +106,7 @@ class testEnv(object):
         as failed.
         """
         os.chdir(self.current_dir)
-        seed = qcow2.create_image('test_image.qcow2', 4*512)
+        seed = qcow2.create_image('test_image.qcow2', 4*512, seed)
         multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"\
                  %(seed, " ".join(q_args), self.current_dir),\
                  sys.stdout, self.log, self.parent_log)
@@ -154,12 +154,14 @@ if __name__ == '__main__':
           -b, --binary=PATH    path to the application under test, by default
                                "qemu-img" in PATH or QEMU_IMG environment
                                variables
+          -s, --seed=STRING    seed for a test image generation, by default
+                               will be generated randomly
           -k, --keep_passed    don't remove folders of passed tests
         """)
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'c:hb:k',
-                                   ['command=', 'help', 'binary=',
+        opts, args = getopt.getopt(sys.argv[1:], 'c:hb:s:k',
+                                   ['command=', 'help', 'binary=', 'seed=',
                                     'keep_passed'])
     except getopt.error:
         e = sys.exc_info()[1]
@@ -173,6 +175,7 @@ if __name__ == '__main__':
     command = ['check']
     cleanup = True
     test_bin = None
+    seed = None
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
@@ -183,6 +186,8 @@ if __name__ == '__main__':
             cleanup = False
         elif opt in ('-b', '--binary'):
             test_bin = arg
+        elif opt in ('-s', '--seed'):
+            seed = arg
 
     if not len(args) == 1:
         print 'Error: required parameter "DIRECTORY" missed'
@@ -207,7 +212,7 @@ if __name__ == '__main__':
     # block
     try:
         try:
-            test.execute(command)
+            test.execute(command, seed)
             #Silent exit on user break
         except (KeyboardInterrupt, SystemExit):
             sys.exit(1)
