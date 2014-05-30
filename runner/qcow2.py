@@ -1,6 +1,6 @@
 import struct
 
-def create_image(name, size):
+def create_image(name, size, seed=None):
     '''Create a fully-allocated raw image with sector markers
     Note: The function is temporarily copy-pasted from iotests.py
     '''
@@ -12,4 +12,7 @@ def create_image(name, size):
         i = i + 512
     file.close()
     # Verification of logging functionality
-    return hash(int)
+    if seed == None:
+        return hash(int)
+    else:
+        return seed
