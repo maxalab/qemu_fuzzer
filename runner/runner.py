@@ -106,7 +106,7 @@ class testEnv(object):
         as failed.
         """
         os.chdir(self.current_dir)
-        seed = qcow2.create_image('test_image.qcow2', 4*512, seed)
+        seed = qcow2.create_image('test_image.qcow2', seed)
         multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"\
                  %(seed, " ".join(q_args), self.current_dir),\
                  sys.stdout, self.log, self.parent_log)
