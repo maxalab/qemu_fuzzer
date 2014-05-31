@@ -15,8 +15,8 @@ Test runner
 
 The test runner generates a test image, executes one test, indicates its result
 and collect all test related artefacts (logs, core dumps, test image). The test
-is one start of a test binary, e.g. qemu-io, with specified arguments and one
-test image.
+means one start of a test binary, e.g. qemu-io, with specified arguments and
+one test image.
 Path to a test binary can be specified via environment variables (for now only
 qemu-img). For details see qemu-iotests/check.
 
@@ -26,11 +26,14 @@ Module interfaces
 
 * Test runner/image generator
 
-The runner calls an image generator specifying test image file, size and seed.
-An image generator is expected to create a test image of a specified size using
-a specified seed for random generator and write an image to a file. A file
-should be created if it doesn't exist or overwritten otherwise. Size and seed
-arguments are optional.
+The runner calls an image generator specifying path to a test image file, its
+size and seed. An image generator is expected to create a test image of the
+specified size using the specified seed for random generator and write an image
+to file. File should be created if it doesn't exist or overwritten otherwise.
+Size and seed arguments are optional.
+
+An image generator should return seeds for the logging purpose.
+
 
 Overall fuzzer requirements
 ===========================
