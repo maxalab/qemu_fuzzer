@@ -27,6 +27,7 @@ import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
 # -----
 
+
 def multilog(msg, *output):
     """ Write an object to all of specified file descriptors
     """
@@ -72,15 +73,16 @@ class TestEnv(object):
         if exec_bin is not None:
             self.exec_bin = exec_bin.strip().split(' ')
         else:
-            self.exec_bin = os.environ.get('QEMU_IMG', 'qemu-img').strip()\
-            .split(' ')
+            self.exec_bin = \
+                os.environ.get('QEMU_IMG', 'qemu-img').strip().split(' ')
 
         try:
             os.makedirs(self.current_dir)
         except OSError:
             e = sys.exc_info()[1]
-            print >>sys.stderr, 'Error: The working directory cannot be used.'\
-                ' Reason: %s' %e[1]
+            print >>sys.stderr, \
+                'Error: The working directory cannot be used. Reason: %s' \
+                % e[1]
             raise Exception('Internal error')
 
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
@@ -93,11 +95,8 @@ class TestEnv(object):
         a kill signal depending on result of an execution.
         """
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(self.exec_bin \
-                               + q_args +
-                               ['test_image.qcow2'], stdin=devnull,
-                               stdout=self.log, stderr=self.log)
-
+        return subprocess.call(self.exec_bin + q_args + ['test_image.qcow2'],
+                               stdin=devnull, stdout=self.log, stderr=self.log)
 
     def execute(self, q_args, seed, size=8*512):
         """ Execute a test.
@@ -108,24 +107,24 @@ class TestEnv(object):
         """
         os.chdir(self.current_dir)
         seed = qcow2.create_image('test_image.qcow2', seed, size)
-        multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"\
-                 %(seed, " ".join(q_args), self.current_dir),\
+        multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"
+                 % (seed, " ".join(q_args), self.current_dir),
                  sys.stdout, self.log, self.parent_log)
         try:
             retcode = self._qemu_img(q_args)
         except OSError:
             e = sys.exc_info()[1]
-            multilog("Error: Start of 'qemu_img' failed. Reason: %s\n"\
-                     %e[1], sys.stderr, self.log, self.parent_log)
+            multilog("Error: Start of 'qemu_img' failed. Reason: %s\n"
+                     % e[1], sys.stderr, self.log, self.parent_log)
             raise Exception('Internal error')
 
         if retcode < 0:
             multilog('FAIL: Test terminated by signal %s\n'
-                     %str_signal(-retcode), sys.stderr, self.log, \
+                     % str_signal(-retcode), sys.stderr, self.log,
                      self.parent_log)
         else:
             multilog("PASS: Application exited with the code '%d'\n"
-                     %retcode, sys.stdout, self.log, self.parent_log)
+                     % retcode, sys.stdout, self.log, self.parent_log)
             self.result = True
 
     def finish(self):
@@ -166,7 +165,7 @@ if __name__ == '__main__':
                                     'keep_passed'])
     except getopt.error:
         e = sys.exc_info()[1]
-        print('Error: %s\n\nTry runner.py --help.' %e)
+        print('Error: %s\n\nTry runner.py --help.' % e)
         sys.exit(1)
 
     if len(sys.argv) == 1:
@@ -206,7 +205,7 @@ if __name__ == '__main__':
         test = TestEnv(work_dir, run_log, test_bin, cleanup)
     except:
         e = sys.exc_info()[1]
-        print("FAIL: %s"  %e)
+        print("FAIL: %s" % e)
         sys.exit(1)
 
     # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
@@ -214,12 +213,12 @@ if __name__ == '__main__':
     try:
         try:
             test.execute(command, seed)
-            #Silent exit on user break
+            # Silent exit on user break
         except (KeyboardInterrupt, SystemExit):
             sys.exit(1)
         except:
             e = sys.exc_info()[1]
-            print("FAIL: %s"  %e)
+            print("FAIL: %s" % e)
             sys.exit(1)
     finally:
         test.finish()
