@@ -98,7 +98,7 @@ class testEnv(object):
                                stdout=self.log, stderr=self.log)
 
 
-    def execute(self, q_args, seed):
+    def execute(self, q_args, seed, 4096):
         """ Execute a test.
 
         The method creates a test image, runs 'qemu_img' and analyzes its exit
