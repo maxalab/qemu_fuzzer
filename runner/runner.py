@@ -46,7 +46,7 @@ def str_signal(sig):
             return k
 
 
-class testEnv(object):
+class TestEnv(object):
     """ Trivial test object
 
     The class sets up test environment, generates a test image and executes
@@ -57,6 +57,7 @@ class testEnv(object):
     Test log will include application ('qemu-img') logs besides info sent
     to the summary log.
     """
+
     def __init__(self, work_dir, run_log, exec_bin=None, cleanup=True):
         """Set test environment in a specified work directory.
 
@@ -98,7 +99,7 @@ class testEnv(object):
                                stdout=self.log, stderr=self.log)
 
 
-    def execute(self, q_args, seed, 4096):
+    def execute(self, q_args, seed, size=8*512):
         """ Execute a test.
 
         The method creates a test image, runs 'qemu_img' and analyzes its exit
@@ -106,7 +107,7 @@ class testEnv(object):
         as failed.
         """
         os.chdir(self.current_dir)
-        seed = qcow2.create_image('test_image.qcow2', seed)
+        seed = qcow2.create_image('test_image.qcow2', seed, size)
         multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"\
                  %(seed, " ".join(q_args), self.current_dir),\
                  sys.stdout, self.log, self.parent_log)
@@ -124,7 +125,7 @@ class testEnv(object):
                      self.parent_log)
         else:
             multilog("PASS: Application exited with the code '%d'\n"
-                        %retcode, sys.stdout, self.log, self.parent_log)
+                     %retcode, sys.stdout, self.log, self.parent_log)
             self.result = True
 
     def finish(self):
@@ -142,7 +143,7 @@ class testEnv(object):
 if __name__ == '__main__':
 
     def usage():
-        print( """
+        print("""
         Usage: runner.py [OPTION...] DIRECTORY
 
         Set up test environment in DIRECTORY and run a test in it.
@@ -168,7 +169,7 @@ if __name__ == '__main__':
         print('Error: %s\n\nTry runner.py --help.' %e)
         sys.exit(1)
 
-    if len(sys.argv)==1:
+    if len(sys.argv) == 1:
         usage()
         sys.exit(1)
 
@@ -202,7 +203,7 @@ if __name__ == '__main__':
     run_log = os.path.join(work_dir, 'run.log')
 
     try:
-        test = testEnv(work_dir, run_log, test_bin, cleanup)
+        test = TestEnv(work_dir, run_log, test_bin, cleanup)
     except:
         e = sys.exc_info()[1]
         print("FAIL: %s"  %e)
