@@ -160,7 +160,7 @@ if __name__ == '__main__':
         """)
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'c:hb:s:k',
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:k',
                                    ['command=', 'help', 'binary=', 'seed=',
                                     'keep_passed'])
     except getopt.error:
