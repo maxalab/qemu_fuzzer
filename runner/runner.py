@@ -17,15 +17,13 @@
 #
 
 import sys, os, signal
-import qcow2
-from time import gmtime, strftime
+from time import time, gmtime, strftime
 import subprocess
+import random
 from shutil import rmtree
 import getopt
-# -----For local test environment only
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
-# -----
 
 
 def multilog(msg, *output):
@@ -51,27 +49,35 @@ class TestEnv(object):
     """ Trivial test object
 
     The class sets up test environment, generates a test image and executes
-    qemu_img with specified arguments and a test image provided. All logs
-    are collected.
-    Summary log will contain short descriptions and statuses of all tests in
+    application under tests with specified arguments and a test image provided.
+    All logs are collected.
+    Summary log will contain short descriptions and statuses of tests in
     a run.
-    Test log will include application ('qemu-img') logs besides info sent
+    Test log will include application (e.g. 'qemu-img') logs besides info sent
     to the summary log.
     """
 
-    def __init__(self, work_dir, run_log, exec_bin=None, cleanup=True):
+    def __init__(self, seed, work_dir, run_log, exec_bin=None,
+                 cleanup=True, log_all=False):
         """Set test environment in a specified work directory.
 
         Path to qemu_img will be retrieved from 'QEMU_IMG' environment
-        variable, if not specified.
+        variable, if a test binary is not specified.
         """
+
+        if seed is not None:
+            self.seed = seed
+        else:
+            self.seed = hash(time())
+
 
         self.init_path = os.getcwd()
         self.work_dir = work_dir
         self.current_dir = os.path.join(work_dir, strftime("%Y_%m_%d_%H-%M-%S",
                                                            gmtime()))
         if exec_bin is not None:
-            self.exec_bin = exec_bin.strip().split(' ')
+            print exec_bin
+            self.exec_bin = os.path.realpath(exec_bin).strip().split(' ')
         else:
             self.exec_bin = \
                 os.environ.get('QEMU_IMG', 'qemu-img').strip().split(' ')
@@ -81,50 +87,57 @@ class TestEnv(object):
         except OSError:
             e = sys.exc_info()[1]
             print >>sys.stderr, \
-                'Error: The working directory cannot be used. Reason: %s' \
-                % e[1]
-            raise Exception('Internal error')
-
+                "Error: The working directory '%s' cannot be used. Reason: %s"\
+                % (self.work_dir, e[1])
+            raise
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
         self.parent_log = open(run_log, "a")
         self.result = False
         self.cleanup = cleanup
+        self.log_all = log_all
 
-    def _qemu_img(self, q_args):
-        """ Start qemu_img with specified arguments and return an exit code or
-        a kill signal depending on result of an execution.
+    def _test_app(self, q_args):
+        """ Start application under test with specified arguments and return
+        an exit code or a kill signal depending on result of an execution.
         """
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(self.exec_bin + q_args + ['test_image.qcow2'],
+        return subprocess.call(self.exec_bin + q_args + ['test_image'],
                                stdin=devnull, stdout=self.log, stderr=self.log)
 
-    def execute(self, q_args, seed, size=8*512):
+    def execute(self, q_args, size=8*512):
         """ Execute a test.
 
-        The method creates a test image, runs 'qemu_img' and analyzes its exit
+        The method creates a test image, runs test app and analyzes its exit
         status. If the application was killed by a signal, the test is marked
         as failed.
         """
         os.chdir(self.current_dir)
-        seed = qcow2.create_image('test_image.qcow2', seed, size)
-        multilog("Seed: %s\nCommand: %s\nTest directory: %s\n"
-                 % (seed, " ".join(q_args), self.current_dir),
-                 sys.stdout, self.log, self.parent_log)
+        # Seed initialization should be as close to image generation call
+        # as posssible to avoid a corruption of random sequence
+        random.seed(self.seed)
+        image_generator.create_image('test_image', size)
+        test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
+                       % (self.seed, " ".join(q_args), self.current_dir)
         try:
-            retcode = self._qemu_img(q_args)
+            retcode = self._test_app(q_args)
         except OSError:
             e = sys.exc_info()[1]
-            multilog("Error: Start of 'qemu_img' failed. Reason: %s\n"
-                     % e[1], sys.stderr, self.log, self.parent_log)
-            raise Exception('Internal error')
+            multilog(test_summary + "Error: Start of '%s' failed. " \
+                     "Reason: %s\n\n" % (os.path.basename(self.exec_bin[0]),
+                                         e[1]),
+                     sys.stderr, self.log, self.parent_log)
+            raise
 
         if retcode < 0:
-            multilog('FAIL: Test terminated by signal %s\n'
+            multilog(test_summary + "FAIL: Test terminated by signal %s\n\n"
                      % str_signal(-retcode), sys.stderr, self.log,
                      self.parent_log)
+        elif self.log_all:
+            multilog(test_summary + "PASS: Application exited with the code" +
+                     " '%d'\n\n" % retcode, sys.stdout, self.log,
+                     self.parent_log)
+            self.result = True
         else:
-            multilog("PASS: Application exited with the code '%d'\n"
-                     % retcode, sys.stdout, self.log, self.parent_log)
             self.result = True
 
     def finish(self):
@@ -132,8 +145,6 @@ class TestEnv(object):
         passed tests
         """
         self.log.close()
-        # Delimiter between tests
-        self.parent_log.write("\n")
         self.parent_log.close()
         os.chdir(self.init_path)
         if self.result and self.cleanup:
@@ -143,37 +154,37 @@ if __name__ == '__main__':
 
     def usage():
         print("""
-        Usage: runner.py [OPTION...] DIRECTORY
+        Usage: runner.py [OPTION...] DIRECTORY PATH
 
-        Set up test environment in DIRECTORY and run a test in it.
+        Set up test environment in DIRECTORY and run a test in it. Test image
+        generator should be specified via PATH to it.
 
         Optional arguments:
-          -h, --help           display this help and exit
-          -c, --command=STRING execute qemu-img with arguments specified,
-                               by default STRING="check"
-          -b, --binary=PATH    path to the application under test, by default
-                               "qemu-img" in PATH or QEMU_IMG environment
-                               variables
-          -s, --seed=STRING    seed for a test image generation, by default
-                               will be generated randomly
-          -k, --keep_passed    don't remove folders of passed tests
+          -h, --help                    display this help and exit
+          -b, --binary=PATH             path to the application under test,
+                                        by default "qemu-img" in PATH or
+                                        QEMU_IMG environment variables
+          -c, --command=STRING          execute the tested application
+                                        with arguments specified,
+                                        by default STRING="check"
+          -s, --seed=STRING             seed for a test image generation,
+                                        by default will be generated randomly
+          -k, --keep_passed             don't remove folders of passed tests
+          -v, --verbose                 log information about passed tests
         """)
 
     try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:k',
-                                   ['command=', 'help', 'binary=', 'seed=',
-                                    'keep_passed'])
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:kv',
+                                       ['command=', 'help', 'binary=', 'seed=',
+                                        'keep_passed', 'verbose'])
     except getopt.error:
         e = sys.exc_info()[1]
-        print('Error: %s\n\nTry runner.py --help.' % e)
-        sys.exit(1)
-
-    if len(sys.argv) == 1:
-        usage()
+        print "Error: %s\n\nTry 'runner.py --help' for more information" % e
         sys.exit(1)
 
     command = ['check']
     cleanup = True
+    log_all = False
     test_bin = None
     seed = None
     for opt, arg in opts:
@@ -184,28 +195,36 @@ if __name__ == '__main__':
             command = arg.split(" ")
         elif opt in ('-k', '--keep_passed'):
             cleanup = False
+        elif opt in ('-v', '--verbose'):
+            log_all = True
         elif opt in ('-b', '--binary'):
             test_bin = arg
         elif opt in ('-s', '--seed'):
             seed = arg
 
-    if not len(args) == 1:
-        print 'Error: required parameter "DIRECTORY" missed'
-        usage()
+    if not len(args) == 2:
+        print "Missed parameter\nTry 'runner.py --help' " \
+            "for more information"
         sys.exit(1)
 
     work_dir = args[0]
-    # run_log created in 'main', because multiple tests are expected to \
+    # run_log is created in 'main', because multiple tests are expected to \
     # log in it
-    # TODO: Make unique run_log names on every run (for one test per run
-    # this functionality is omitted in favor of usability)
     run_log = os.path.join(work_dir, 'run.log')
 
+    sys.path.append(os.path.dirname(os.path.realpath(args[1])))
+    generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
-        test = TestEnv(work_dir, run_log, test_bin, cleanup)
+        image_generator = __import__(generator_name)
     except:
         e = sys.exc_info()[1]
-        print("FAIL: %s" % e)
+        print "Error: The image generator '%s' cannot be imported.\n" \
+            "Reason: %s" % (generator_name, e)
+        sys.exit(1)
+
+    try:
+        test = TestEnv(seed, work_dir, run_log, test_bin, cleanup, log_all)
+    except OSError:
         sys.exit(1)
 
     # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
@@ -214,11 +233,7 @@ if __name__ == '__main__':
         try:
             test.execute(command, seed)
             # Silent exit on user break
-        except (KeyboardInterrupt, SystemExit):
-            sys.exit(1)
-        except:
-            e = sys.exc_info()[1]
-            print("FAIL: %s" % e)
+        except (KeyboardInterrupt, SystemExit, OSError):
             sys.exit(1)
     finally:
         test.finish()
