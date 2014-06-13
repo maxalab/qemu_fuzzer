@@ -61,9 +61,9 @@ def header(cluster_bits, img_size):
     ]
 
 
-def create_image(v_file):
+def create_image(test_img_path):
     """Write a fuzzed image to the specified file"""
-    image_file = open(v_file, 'w')
+    image_file = open(test_img_path, 'w')
     cluster_bits, v_image_size = image_size()
     # Create an empty image
     # (sparse if FS supports it or preallocated otherwise)

@@ -17,7 +17,7 @@
 #
 
 import sys, os, signal
-from time import time, gmtime, strftime
+from time import time
 import subprocess
 import random
 from shutil import rmtree
@@ -57,7 +57,7 @@ class TestEnv(object):
     to the summary log.
     """
 
-    def __init__(self, seed, work_dir, run_log, exec_bin=None,
+    def __init__(self, test_id, seed, work_dir, run_log, exec_bin=None,
                  cleanup=True, log_all=False):
         """Set test environment in a specified work directory.
 
@@ -70,11 +70,9 @@ class TestEnv(object):
         else:
             self.seed = hash(time())
 
-
         self.init_path = os.getcwd()
         self.work_dir = work_dir
-        self.current_dir = os.path.join(work_dir, strftime("%Y_%m_%d_%H-%M-%S",
-                                                           gmtime()))
+        self.current_dir = os.path.join(work_dir, 'test-' + test_id)
         if exec_bin is not None:
             self.exec_bin = exec_bin.strip().split(' ')
         else:
@@ -152,7 +150,7 @@ class TestEnv(object):
 if __name__ == '__main__':
 
     def usage():
-        print("""
+        print """
         Usage: runner.py [OPTION...] DIRECTORY PATH
 
         Set up test environment in DIRECTORY and run a test in it. Test image
@@ -170,7 +168,7 @@ if __name__ == '__main__':
                                         by default will be generated randomly
           -k, --keep_passed             don't remove folders of passed tests
           -v, --verbose                 log information about passed tests
-        """)
+        """
 
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:kv',
@@ -211,21 +209,23 @@ if __name__ == '__main__':
     # log in it
     run_log = os.path.join(work_dir, 'run.log')
 
-    #Add the module path to sys.path
+    # Add the module path to sys.path
     sys.path.append(os.path.dirname(os.path.realpath(args[1])))
-    #Remove a script extension if any
+    # Remove a script extension if any
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
         image_generator = __import__(generator_name)
-    except:
+    except ImportError:
         e = sys.exc_info()[1]
         print "Error: The image generator '%s' cannot be imported.\n" \
             "Reason: %s" % (generator_name, e)
         sys.exit(1)
 
-    #Create test object
+    # Create test object
+    test_id = '01'
     try:
-        test = TestEnv(seed, work_dir, run_log, test_bin, cleanup, log_all)
+        test = TestEnv(test_id, seed, work_dir, run_log, test_bin, cleanup,
+                       log_all)
     except OSError:
         sys.exit(1)
 
