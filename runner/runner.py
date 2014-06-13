@@ -76,7 +76,7 @@ class TestEnv(object):
         self.current_dir = os.path.join(work_dir, strftime("%Y_%m_%d_%H-%M-%S",
                                                            gmtime()))
         if exec_bin is not None:
-            self.exec_bin = os.path.realpath(exec_bin).strip().split(' ')
+            self.exec_bin = exec_bin.strip().split(' ')
         else:
             self.exec_bin = \
                 os.environ.get('QEMU_IMG', 'qemu-img').strip().split(' ')
@@ -197,7 +197,7 @@ if __name__ == '__main__':
         elif opt in ('-v', '--verbose'):
             log_all = True
         elif opt in ('-b', '--binary'):
-            test_bin = arg
+            test_bin = os.path.realpath(arg)
         elif opt in ('-s', '--seed'):
             seed = arg
 
@@ -206,7 +206,7 @@ if __name__ == '__main__':
             "for more information"
         sys.exit(1)
 
-    work_dir = args[0]
+    work_dir = os.path.realpath(args[0])
     # run_log is created in 'main', because multiple tests are expected to \
     # log in it
     run_log = os.path.join(work_dir, 'run.log')
