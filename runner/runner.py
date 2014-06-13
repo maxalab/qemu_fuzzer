@@ -104,7 +104,7 @@ class TestEnv(object):
         return subprocess.call(self.exec_bin + q_args + ['test_image'],
                                stdin=devnull, stdout=self.log, stderr=self.log)
 
-    def execute(self, q_args, size=8*512):
+    def execute(self, q_args):
         """ Execute a test.
 
         The method creates a test image, runs test app and analyzes its exit
@@ -115,7 +115,7 @@ class TestEnv(object):
         # Seed initialization should be as close to image generation call
         # as posssible to avoid a corruption of random sequence
         random.seed(self.seed)
-        image_generator.create_image('test_image', size)
+        image_generator.create_image('test_image')
         test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
                        % (self.seed, " ".join(q_args), self.current_dir)
         try:
@@ -212,7 +212,9 @@ if __name__ == '__main__':
     # log in it
     run_log = os.path.join(work_dir, 'run.log')
 
+    #Add the module path to sys.path
     sys.path.append(os.path.dirname(os.path.realpath(args[1])))
+    #Remove a script extension if any
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
         image_generator = __import__(generator_name)
@@ -222,6 +224,7 @@ if __name__ == '__main__':
             "Reason: %s" % (generator_name, e)
         sys.exit(1)
 
+    #Create test object
     try:
         test = TestEnv(seed, work_dir, run_log, test_bin, cleanup, log_all)
     except OSError:
@@ -231,7 +234,7 @@ if __name__ == '__main__':
     # block
     try:
         try:
-            test.execute(command, seed)
+            test.execute(command)
             # Silent exit on user break
         except (KeyboardInterrupt, SystemExit, OSError):
             sys.exit(1)
