@@ -106,7 +106,7 @@ def crypt_method(current):
 def l1_size(current):
     """Fuzz L1 table size header field"""
     constraints = [
-        [(1, UINT32)]
+        [(0, UINT32)]
     ]
     return selector(current, constraints)
 
@@ -114,7 +114,7 @@ def l1_size(current):
 def l1_table_offset(current):
     """Fuzz L1 table offset header field"""
     constraints = [
-        [(1, UINT64)]
+        [(0, UINT64)]
     ]
     return selector(current, constraints)
 
@@ -122,7 +122,7 @@ def l1_table_offset(current):
 def refcount_table_offset(current):
     """Fuzz refcount table offset header field"""
     constraints = [
-        [(1, UINT64)]
+        [(0, UINT64)]
     ]
     return selector(current, constraints)
 
@@ -130,7 +130,7 @@ def refcount_table_offset(current):
 def refcount_table_clusters(current):
     """Fuzz refcount table clusters header field"""
     constraints = [
-        [(1, UINT32)]
+        [(0, UINT32)]
     ]
     return selector(current, constraints)
 
@@ -138,7 +138,7 @@ def refcount_table_clusters(current):
 def nb_snapshots(current):
     """Fuzz number of snapshots header field"""
     constraints = [
-        [(1, UINT32)]
+        [(0, UINT32)]
     ]
     return selector(current, constraints)
 
@@ -146,6 +146,6 @@ def nb_snapshots(current):
 def snapshots_offset(current):
     """Fuzz snapshots offset header field"""
     constraints = [
-        [(1, UINT64)]
+        [(0, UINT64)]
     ]
     return selector(current, constraints)
