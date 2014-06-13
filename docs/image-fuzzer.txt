@@ -17,22 +17,32 @@ The test runner generates a test image, executes one test, indicates its result
 and collect all test related artefacts (logs, core dumps, test image). The test
 means one start of a test binary, e.g. qemu-io, with specified arguments and
 one test image.
-Path to a test binary can be specified via environment variables (for now only
-qemu-img). For details see qemu-iotests/check.
+
+The runner uses an external image fuzzer to generate test images. An image
+generator is specified as a mandatory parameter of the test runner. Details
+about interactions between the runner and fuzzers see "Module interfaces".
+
+The runner activates generation of core dumps during test executions, but it
+assumes that core dumps will be generated in the current working directory.
+For comprehensive test results, please, set up your test environment
+correspondingly.
+
+Path to a binary under test can be specified via environment variables (for now
+only qemu-img) or the runner parameter. For details about environment variables
+see qemu-iotests/check.
 
 
 Module interfaces
 -----------------
 
-* Test runner/image generator
+* Test runner/image fuzzer
 
-The runner calls an image generator specifying path to a test image file, its
-size and seed. An image generator is expected to create a test image of the
-specified size using the specified seed for random generator and write an image
-to file. File should be created if it doesn't exist or overwritten otherwise.
-Size and seed arguments are optional.
-
-An image generator should return seeds for the logging purpose.
+The runner calls an image generator specifying path to a test image file.
+An image generator is expected to provide 'create_image(test_img_path)' method
+that creates a test image and writes it to the specified file. The file should
+be created if it doesn't exist or overwritten otherwise.
+Random seed is set by the runner at every test execution for the regression
+purpose, so an image generator is not recommended to modify it internally.
 
 
 Overall fuzzer requirements
