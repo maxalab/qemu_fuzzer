@@ -76,7 +76,6 @@ class TestEnv(object):
         self.current_dir = os.path.join(work_dir, strftime("%Y_%m_%d_%H-%M-%S",
                                                            gmtime()))
         if exec_bin is not None:
-            print exec_bin
             self.exec_bin = os.path.realpath(exec_bin).strip().split(' ')
         else:
             self.exec_bin = \
