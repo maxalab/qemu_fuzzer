@@ -11,25 +11,53 @@ elements, e.g. L1/L2 tables, having random invalid values.
 
 
 Test runner
-------
+-----------
 
-The test runner generates a test image, executes one test, indicates its result
-and collect all test related artefacts (logs, core dumps, test image). The test
-means one start of a test binary, e.g. qemu-io, with specified arguments and
-one test image.
+The test runner generates test images, executes tests utilizing generated
+images, indicates their results and collect all test related artifacts (logs,
+core dumps, test image).
+The test means one start of a system under test (SUT), e.g. qemu-io, with
+specified arguments and one test image.
 
 The runner uses an external image fuzzer to generate test images. An image
-generator is specified as a mandatory parameter of the test runner. Details
-about interactions between the runner and fuzzers see "Module interfaces".
+generator should be specified as a mandatory parameter of the test runner.
+Details about interactions between the runner and fuzzers see "Module
+interfaces".
 
 The runner activates generation of core dumps during test executions, but it
 assumes that core dumps will be generated in the current working directory.
 For comprehensive test results, please, set up your test environment
-correspondingly.
+properly.
 
 Path to a binary under test can be specified via environment variables (for now
 only qemu-img) or the runner parameter. For details about environment variables
 see qemu-iotests/check.
+
+
+Qcow2 image generator
+---------------------
+
+The 'qcow2' generator is a Python package providing
+'create_image(test_img_path)' method as a single public API. Other methods can
+be accessed by specifying a submodule prefix, e.g.
+
+ import qcow2
+
+ qcow2.create_image('test_image')
+ qcow2.fuzz.version()'
+
+
+Qcow2 contains two submodules: fuzz.py and layout.py.
+
+'fuzz.py' contains all fuzzing functions one per image field. It's assumed that
+after code analysis every field will have own constraints for its value.
+
+'layout.py' creates a random valid image, fuzzes a random subset of the image
+fields based on their already generated valid values and writes the fuzzed
+image to the file specified.
+
+For now only header fields are generated, the remaining file is filled with
+zeros.
 
 
 Module interfaces
@@ -43,6 +71,16 @@ that creates a test image and writes it to the specified file. The file should
 be created if it doesn't exist or overwritten otherwise.
 Random seed is set by the runner at every test execution for the regression
 purpose, so an image generator is not recommended to modify it internally.
+
+* Test runner/SUT
+
+For now a full test command is composed from the SUT, SUT arguments specified
+via '-c' runner parameter and the name of generated image, e.g. for qemu-img
+as a SUT and 'check' command the result call will be
+
+  qemu-img check test_image
+
+where 'test_image' is predefined name for any generated image.
 
 
 Overall fuzzer requirements
