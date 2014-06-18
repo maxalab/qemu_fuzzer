@@ -1,4 +1,21 @@
-"""Generator of fuzzed qcow2 images"""
+# Generator of fuzzed qcow2 images
+#
+# Copyright (C) 2014 Maria Kustova <maria.k@catit.be>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
 import random
 import struct
 import fuzz
@@ -15,8 +32,20 @@ def fuzz_struct(structure):
     """
     extract = random.sample(structure,
                             random.randint(len(structure)/5, len(structure)/2))
-    return [field[0:2] + [getattr(fuzz, field[3])(field[2])] + field[-1:]
-            if field in extract else field for field in structure]
+
+    def iter_fuzz(field):
+        """Fuzz field value if it's selected
+
+        This auxiliary function replaces short circuit conditions not supported
+        in Python 2.4
+        """
+        if field in extract:
+            return field[0:2] + [getattr(fuzz, field[3])(field[2])] \
+                + field[-1:]
+        else:
+            return field
+
+    return [iter_fuzz(field) for field in structure]
 
 
 def image_size():
@@ -44,6 +73,19 @@ def header(cluster_bits, img_size):
     refcount_table_clusters = 0
     nb_snapshots = 0
     snapshots_offset = 0
+    # From the e-mail thread for [PATCH] docs: Define refcount_bits value:
+    # Only refcount_order = 4 is supported by QEMU at the moment
+    refcount_order = 4
+    autoclear_features = 0  # doesn't depend on version
+    if version == 2:
+        incompatible_features = 0
+        compatible_features = 0
+        header_length = 72
+    else:
+        incompatible_features = random.getrandbits(2)
+        compatible_features = random.getrandbits(1)
+        header_length = 104
+
     return [
         [0, '>4s', magic, 'magic'],
         [4, '>I', version, 'version'],
@@ -57,7 +99,12 @@ def header(cluster_bits, img_size):
         [48, '>Q', refcount_table_offset, 'refcount_table_offset'],
         [56, '>I', refcount_table_clusters, 'refcount_table_clusters'],
         [60, '>I', nb_snapshots, 'nb_snapshots'],
-        [64, '>Q', snapshots_offset, 'snapshots_offset']
+        [64, '>Q', snapshots_offset, 'snapshots_offset'],
+        [72, '>Q', incompatible_features, 'incompatible_features'],
+        [80, '>Q', compatible_features, 'compatible_features'],
+        [88, '>Q', autoclear_features, 'autoclear_features'],
+        [96, '>I', refcount_order, 'refcount_order'],
+        [100, '>I', header_length, 'header_length']
     ]
 
 
