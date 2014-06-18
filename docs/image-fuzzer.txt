@@ -18,6 +18,10 @@ images, indicates their results and collect all test related artifacts (logs,
 core dumps, test image).
 The test means one start of a system under test (SUT), e.g. qemu-io, with
 specified arguments and one test image.
+By default, the test runner generates new tests and executes them until
+keyboard interruption. But if a test seed is specified via '-s' runner
+parameter, then only one test with this seed will be executed, after its finish
+the runner will exit.
 
 The runner uses an external image fuzzer to generate test images. An image
 generator should be specified as a mandatory parameter of the test runner.
