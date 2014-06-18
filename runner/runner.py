@@ -20,6 +20,7 @@ import sys, os, signal
 from time import time
 import subprocess
 import random
+from itertools import count
 from shutil import rmtree
 import getopt
 import resource
@@ -43,6 +44,11 @@ def str_signal(sig):
     for k, v in signal.__dict__.items():
         if v == sig:
             return k
+
+
+class TestException(Exception):
+    """Exception for errors risen by TestEnv objects"""
+    pass
 
 
 class TestEnv(object):
@@ -86,7 +92,7 @@ class TestEnv(object):
             print >>sys.stderr, \
                 "Error: The working directory '%s' cannot be used. Reason: %s"\
                 % (self.work_dir, e[1])
-            raise
+            raise TestException
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
         self.parent_log = open(run_log, "a")
         self.result = False
@@ -123,7 +129,7 @@ class TestEnv(object):
                      "Reason: %s\n\n" % (os.path.basename(self.exec_bin[0]),
                                          e[1]),
                      sys.stderr, self.log, self.parent_log)
-            raise
+            raise TestException
 
         if retcode < 0:
             multilog(test_summary + "FAIL: Test terminated by signal %s\n\n"
@@ -169,6 +175,26 @@ if __name__ == '__main__':
           -k, --keep_passed             don't remove folders of passed tests
           -v, --verbose                 log information about passed tests
         """
+
+    def run_test(test_id, seed, work_dir, run_log, test_bin, cleanup, log_all,
+                 command):
+        """Setup environment for one test and execute this test"""
+        try:
+            test = TestEnv(test_id, seed, work_dir, run_log, test_bin, cleanup,
+                           log_all)
+        except TestException:
+            sys.exit(1)
+
+        # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
+        # block
+        try:
+            try:
+                test.execute(command)
+            # Silent exit on user break
+            except TestException:
+                sys.exit(1)
+        finally:
+            test.finish()
 
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:kv',
@@ -221,21 +247,14 @@ if __name__ == '__main__':
             "Reason: %s" % (generator_name, e)
         sys.exit(1)
 
-    # Create test object
-    test_id = '01'
-    try:
-        test = TestEnv(test_id, seed, work_dir, run_log, test_bin, cleanup,
-                       log_all)
-    except OSError:
-        sys.exit(1)
-
-    # Python 2.4 doesn't support 'finally' and 'except' in the same 'try'
-    # block
-    try:
+    # If a seed is specified, only one test will be executed.
+    # Otherwise runner will terminate after a keyboard interruption
+    for test_id in count(1):
         try:
-            test.execute(command)
-            # Silent exit on user break
-        except (KeyboardInterrupt, SystemExit, OSError):
+            run_test(str(test_id), seed, work_dir, run_log, test_bin, cleanup,
+                     log_all, command)
+        except (KeyboardInterrupt, SystemExit):
             sys.exit(1)
-    finally:
-        test.finish()
+
+        if seed is not None:
+            break
