@@ -4,7 +4,7 @@
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
+# the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -40,8 +40,8 @@ def fuzz_struct(structure):
         in Python 2.4
         """
         if field in extract:
-            return field[0:2] + [getattr(fuzz, field[3])(field[2])] \
-                + field[-1:]
+            return (field[0:2] + [getattr(fuzz, field[3])(field[2])] +
+                    field[-1:])
         else:
             return field
 
