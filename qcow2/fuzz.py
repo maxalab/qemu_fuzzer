@@ -19,12 +19,22 @@
 import random
 
 
-UINT32 = 2**32 - 1
-UINT64 = 2**64 - 1
+UINT32 = 0xffffffff
+UINT64 = 0xffffffffffffffff
 # Most significant bit orders
 UINT32_M = 31
 UINT64_M = 63
-
+# Fuzz vectors
+UINT32_V = [0, 0x100, 0x1000, 0x10000, 0x100000, UINT32/4, UINT32/2 - 1,
+            UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32 ]
+UINT64_V = UINT32_V + [0x1000000, 0x10000000, 0x100000000, UINT64/4,
+                       UINT64/2 - 1, UINT64/2, UINT64/2 + 1, UINT64 - 1,
+                       UINT64]
+STRING_V = ['%s%p%x%d', '.1024d', '%.2049d', '%p%p%p%p', '%x%x%x%x',
+            '%d%d%d%d', '%s%s%s%s', '%99999999999s', '%08x', '%%20d', '%%20n',
+            '%%20x', '%%20s', '%s%s%s%s%s%s%s%s%s%s', '%p%p%p%p%p%p%p%p%p%p',
+            '%#0123456x%08x%x%s%p%d%n%o%u%c%h%l%q%j%z%Z%t%i%e%g%f%a%C%S%08x%%',
+            '%s x 129', '%x x 257']
 
 def random_from_intervals(intervals):
     """Select a random integer number from the list of specified intervals
@@ -72,7 +82,7 @@ def validator(current, intervals):
         return val
 
 
-Backing file format namedef bit_validator(current, bit_ranges):
+def bit_validator(current, bit_ranges):
     """Return a random bit mask not equal to the current.
 
     This function is useful for selection from valid values except current one.
@@ -131,7 +141,7 @@ def magic(current):
 
 def version(current):
     """Fuzz version header field"""
-    constraints = [
+    constraints = UINT32_V + [
         [(2, 3)],  # correct values
         [(0, 1), (4, UINT32)]
     ]
@@ -140,23 +150,19 @@ def version(current):
 
 def backing_file_offset(current):
     """Fuzz backing file offset header field"""
-    constraints = [
-        [(0, UINT64)]
-    ]
+    constraints = UINT64_V
     return selector(current, constraints)
 
 
 def backing_file_size(current):
     """Fuzz backing file size header field"""
-    constraints = [
-        [(0, UINT32)]
-    ]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def cluster_bits(current):
     """Fuzz cluster bits header field"""
-    constraints = [
+    constraints = UINT32_V + [
         [(9, 20)],  # correct values
         [(0, 9), (20, UINT32)]
     ]
@@ -165,15 +171,13 @@ def cluster_bits(current):
 
 def size(current):
     """Fuzz image size header field"""
-    constraints = [
-        [(0, UINT64)]
-    ]
+    constraints = UINT64_V
     return selector(current, constraints)
 
 
 def crypt_method(current):
     """Fuzz crypt method header field"""
-    constraints = [
+    constraints = UINT32_V + [
         [(0, 1)],
         [(2, UINT32)]
     ]
@@ -182,49 +186,37 @@ def crypt_method(current):
 
 def l1_size(current):
     """Fuzz L1 table size header field"""
-    constraints = [
-        [(0, UINT32)]
-    ]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def l1_table_offset(current):
     """Fuzz L1 table offset header field"""
-    constraints = [
-        [(0, UINT64)]
-    ]
+    constraints = UINT64_V
     return selector(current, constraints)
 
 
 def refcount_table_offset(current):
     """Fuzz refcount table offset header field"""
-    constraints = [
-        [(0, UINT64)]
-    ]
+    constraints = UINT64_V
     return selector(current, constraints)
 
 
 def refcount_table_clusters(current):
     """Fuzz refcount table clusters header field"""
-    constraints = [
-        [(0, UINT32)]
-    ]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def nb_snapshots(current):
     """Fuzz number of snapshots header field"""
-    constraints = [
-        [(0, UINT32)]
-    ]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def snapshots_offset(current):
     """Fuzz snapshots offset header field"""
-    constraints = [
-        [(0, UINT64)]
-    ]
+    constraints = UINT64_V
     return selector(current, constraints)
 
 
@@ -255,15 +247,13 @@ def autoclear_features(current):
 
 def refcount_order(current):
     """Fuzz number of refcount order header field"""
-    constraints = [
-        [(0, UINT32)]
-    ]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def header_length(current):
     """Fuzz number of refcount order header field"""
-    constraints = [
+    constraints = UINT32_V + [
         72,
         104,
         [(0, UINT32)]
