@@ -28,7 +28,7 @@ UINT32_S = 4
 UINT64_S = 8
 
 # Percentage of fields will be fuzzed
-BIAS = random.uniform(0, 0)
+BIAS = random.uniform(0.1, 0.4)
 
 
 class Field(object):
