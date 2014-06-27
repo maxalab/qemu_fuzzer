@@ -26,7 +26,7 @@ UINT32_M = 31
 UINT64_M = 63
 # Fuzz vectors
 UINT32_V = [0, 0x100, 0x1000, 0x10000, 0x100000, UINT32/4, UINT32/2 - 1,
-            UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32 ]
+            UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32]
 UINT64_V = UINT32_V + [0x1000000, 0x10000000, 0x100000000, UINT64/4,
                        UINT64/2 - 1, UINT64/2, UINT64/2 + 1, UINT64 - 1,
                        UINT64]
@@ -35,6 +35,7 @@ STRING_V = ['%s%p%x%d', '.1024d', '%.2049d', '%p%p%p%p', '%x%x%x%x',
             '%%20x', '%%20s', '%s%s%s%s%s%s%s%s%s%s', '%p%p%p%p%p%p%p%p%p%p',
             '%#0123456x%08x%x%s%p%d%n%o%u%c%h%l%q%j%z%Z%t%i%e%g%f%a%C%S%08x%%',
             '%s x 129', '%x x 257']
+
 
 def random_from_intervals(intervals):
     """Select a random integer number from the list of specified intervals
@@ -70,14 +71,22 @@ def random_bits(bit_ranges):
     return val
 
 
-def validator(current, intervals):
+def truncate_string(strings, length):
+    """Return strings truncated to specified length"""
+    if type(strings) == list:
+        return [s[length:] for s in strings]
+    else:
+        return strings[length:]
+
+
+def int_validator(current, intervals):
     """Return a random value from intervals not equal to the current.
 
     This function is useful for selection from valid values except current one.
     """
     val = random_from_intervals(intervals)
     if val == current:
-        return validator(current, intervals)
+        return int_validator(current, intervals)
     else:
         return val
 
@@ -95,17 +104,30 @@ def bit_validator(current, bit_ranges):
         return val
 
 
-def selector(current, constraints, is_bitmask=None):
+def string_validator(current, strings):
+    """Return a random string value from the list not equal to the current.
+
+    This function is useful for selection from valid values except current one.
+    """
+
+    val = random.choice(strings)
+    if val == current:
+        return string_validator(current, strings)
+    else:
+        return val
+
+
+def selector(current, constraints, fmt=None):
     """Select one value from all defined by constraints
 
     Each constraint produces one random value satisfying to it. The function
     randomly selects one value satisfying at least one constraint (depending on
     constraints overlaps).
     """
-    if is_bitmask is None:
-        validate = validator
-    else:
-        validate = bit_validator
+    validate = {
+        'bitmask': bit_validator,
+        'string': string_validator
+    }.get(fmt, int_validator)
 
     def iter_validate(c):
         """Apply validate() only to constraints represented as lists
@@ -178,7 +200,7 @@ def size(current):
 def crypt_method(current):
     """Fuzz crypt method header field"""
     constraints = UINT32_V + [
-        [(0, 1)],
+        1,
         [(2, UINT32)]
     ]
     return selector(current, constraints)
@@ -226,7 +248,7 @@ def incompatible_features(current):
         [(0, 1)],  # allowable values
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 1)
+    return selector(current, constraints, 'bitmask')
 
 
 def compatible_features(current):
@@ -234,7 +256,7 @@ def compatible_features(current):
     constraints = [
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 1)
+    return selector(current, constraints, 'bitmask')
 
 
 def autoclear_features(current):
@@ -242,7 +264,7 @@ def autoclear_features(current):
     constraints = [
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 1)
+    return selector(current, constraints, 'bitmask')
 
 
 def refcount_order(current):
@@ -259,3 +281,49 @@ def header_length(current):
         [(0, UINT32)]
     ]
     return selector(current, constraints)
+
+
+def ext_magic(current):
+    """Fuzz magic field of a header extension"""
+    constraints = UINT32_V
+    return selector(current, constraints)
+
+
+def ext_length(current):
+    """Fuzz length field of a header extension"""
+    constraints = UINT32_V
+    return selector(current, constraints)
+
+
+def bf_data(current):
+    """Fuzz backing file format in the corresponding header extension"""
+    constraints = [
+        truncate_string(STRING_V, len(current)),
+        truncate_string(STRING_V, (len(current) + 7) & ~7)  # Fuzz padding
+    ]
+    return selector(current, constraints, 'string')
+
+
+def feat_type(current):
+    """Fuzz feature type field of a feature name table header extension"""
+    constraints = [
+        [(0, 255)]
+    ]
+    return selector(current, constraints)
+
+
+def feat_bit_number(current):
+    """Fuzz bit number field of a feature name table header extension"""
+    constraints = [
+        [(0, 255)]
+    ]
+    return selector(current, constraints)
+
+
+def feat_name(current):
+    """Fuzz feature name field of a feature name table header extension"""
+    constraints = [
+        truncate_string(STRING_V, len(current)),
+        truncate_string(STRING_V, 48)  # Fuzz padding (field length = 48)
+    ]
+    return selector(current, constraints, 'string')
