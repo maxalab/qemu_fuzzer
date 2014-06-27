@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # Tool for running fuzz tests
 #
 # Copyright (C) 2014 Maria Kustova <maria.k@catit.be>
@@ -104,7 +106,7 @@ class TestEnv(object):
         an exit code or a kill signal depending on result of an execution.
         """
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(self.exec_bin + q_args + ['test_image'],
+        return subprocess.call(self.exec_bin + q_args,
                                stdin=devnull, stdout=self.log, stderr=self.log)
 
     def execute(self, q_args):
@@ -157,10 +159,14 @@ if __name__ == '__main__':
 
     def usage():
         print """
-        Usage: runner.py [OPTION...] DIRECTORY PATH
+        Usage: runner.py [OPTION...] TEST_DIR IMG_GENERATOR
 
-        Set up test environment in DIRECTORY and run a test in it. Test image
-        generator should be specified via PATH to it.
+        Set up test environment in TEST_DIR and run a test in it. A module for
+        test image generation should be specified via IMG_GENERATOR. Use
+        TEST_IMG alias to mark the position in the command where a test image
+        name should be placed.
+        Example:
+        python runner.py -b ./qemu-img -c 'info TEST_IMG' /tmp/test ../qcow2
 
         Optional arguments:
           -h, --help                    display this help and exit
@@ -247,6 +253,10 @@ if __name__ == '__main__':
             "Reason: %s" % (generator_name, e)
         sys.exit(1)
 
+    # Replace test image alias with its real name
+    for idx, item in enumerate(command):
+        if item == 'TEST_IMG':
+            command[idx] = 'test_image'
     # If a seed is specified, only one test will be executed.
     # Otherwise runner will terminate after a keyboard interruption
     for test_id in count(1):
