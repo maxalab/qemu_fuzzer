@@ -15,7 +15,7 @@ Test runner
 
 The test runner generates test images, executes tests utilizing generated
 images, indicates their results and collect all test related artifacts (logs,
-core dumps, test image).
+core dumps, test images).
 The test means one start of a system under test (SUT), e.g. qemu-io, with
 specified arguments and one test image.
 By default, the test runner generates new tests and executes them till

@@ -53,8 +53,8 @@ class Field(object):
 
 
 def walk(v_struct, func):
-    """Walk via structure and apply the specified function to all its non-list
-    and non-dict elements
+    """Walk via structure and apply the specified function to all Field()
+    elements
     """
     if isinstance(v_struct, list):
         for item in v_struct:
@@ -73,17 +73,13 @@ def fuzz_struct(structure):
 
     """
     def coin():
-        """Return boolean value proportionally to a portion of fields to be
+        """Return boolean value proportional to a portion of fields to be
         fuzzed
         """
         return random.random() < BIAS
 
     def iter_fuzz(field, name):
-        """Fuzz field value if it's selected
-
-        This auxiliary function replaces short circuit conditions not supported
-        in Python 2.4
-        """
+        """Fuzz field value if it's selected """
         if coin():
             field.value = getattr(fuzz, name)(field.value)
 
@@ -139,9 +135,6 @@ def header(cluster_bits, img_size):
         v_header['incompatible_features'].value = random.getrandbits(2)
         v_header['compatible_features'].value = random.getrandbits(1)
         v_header['header_length'].value = 104
-    # ---------DEBUG----------
-    v_header['backing_file_offset'].value = 480
-    # ---------DEBUG----------
 
     # From the e-mail thread for [PATCH] docs: Define refcount_bits value:
     # Only refcount_order = 4 is supported by QEMU at the moment
@@ -180,8 +173,7 @@ def header_extensions(header):
     inner_offset = start_offset + 2*UINT32_S
 
     # Each tuple is (bit value in the corresponding header field, feature type,
-    # number of the bit in the header field, feature name
-    # TODO: Replace hardcode with generation of feature_list
+    # number of the bit in the header field, feature name)
     feature_list = [
         (header['incompatible_features'].value & 1, 0, 1, 'dirty bit'),
         (header['incompatible_features'].value & 2, 0, 2, 'corrupt bit'),
@@ -229,7 +221,8 @@ def create_image(test_img_path):
     # (sparse if FS supports it or preallocated otherwise)
     image_file.seek(v_image_size - 1)
     image_file.write("\0")
-    # Image as inner references
+    # Image structure defined as references between image blocks
+    # List is used because of its order.
     meta_img = [
         lambda x: header(cluster_bits, v_image_size),
         lambda x: header_extensions(x[0])
@@ -238,6 +231,9 @@ def create_image(test_img_path):
     # Valid image
     img = []
 
+    # On every step all prerequisites for the current image block
+    # are already evaluated, e.g. the header (img[0]) is generated and
+    # available for header_extensions() function that will produce img[1]
     for ref in meta_img:
         img.append(ref(img))
 

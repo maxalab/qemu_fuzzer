@@ -237,13 +237,13 @@ if __name__ == '__main__':
         sys.exit(1)
 
     work_dir = os.path.realpath(args[0])
-    # run_log is created in 'main', because multiple tests are expected to \
+    # run_log is created in 'main', because multiple tests are expected to
     # log in it
     run_log = os.path.join(work_dir, 'run.log')
 
-    # Add the module path to sys.path
+    # Add the path to the image generator module to sys.path
     sys.path.append(os.path.dirname(os.path.realpath(args[1])))
-    # Remove a script extension if any
+    # Remove a script extension from image generator module if any
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
         image_generator = __import__(generator_name)
