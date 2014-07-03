@@ -74,9 +74,9 @@ def random_bits(bit_ranges):
 def truncate_string(strings, length):
     """Return strings truncated to specified length"""
     if type(strings) == list:
-        return [s[length:] for s in strings]
+        return [s[:length] for s in strings]
     else:
-        return strings[length:]
+        return strings[:length]
 
 
 def int_validator(current, intervals):
@@ -109,7 +109,6 @@ def string_validator(current, strings):
 
     This function is useful for selection from valid values except current one.
     """
-
     val = random.choice(strings)
     if val == current:
         return string_validator(current, strings)
