@@ -25,6 +25,7 @@ import random
 from itertools import count
 from shutil import rmtree
 import getopt
+import ConfigParser
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
 
@@ -66,7 +67,7 @@ class TestEnv(object):
     """
 
     def __init__(self, test_id, seed, work_dir, run_log, exec_bin=None,
-                 cleanup=True, log_all=False):
+                 cleanup=True, log_all=False, fuzz_config=None):
         """Set test environment in a specified work directory.
 
         Path to qemu_img will be retrieved from 'QEMU_IMG' environment
@@ -100,6 +101,7 @@ class TestEnv(object):
         self.result = False
         self.cleanup = cleanup
         self.log_all = log_all
+        self.fuzz_config = fuzz_config
 
     def _test_app(self, q_args):
         """ Start application under test with specified arguments and return
@@ -120,7 +122,7 @@ class TestEnv(object):
         # Seed initialization should be as close to image generation call
         # as posssible to avoid a corruption of random sequence
         random.seed(self.seed)
-        image_generator.create_image('test_image')
+        image_generator.create_image('test_image', self.fuzz_config)
         test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
                        % (self.seed, " ".join(q_args), self.current_dir)
         try:
@@ -178,16 +180,17 @@ if __name__ == '__main__':
                                         by default STRING="check"
           -s, --seed=STRING             seed for a test image generation,
                                         by default will be generated randomly
+          --config=FILE                 take fuzzer configuration from FILE
           -k, --keep_passed             don't remove folders of passed tests
           -v, --verbose                 log information about passed tests
         """
 
     def run_test(test_id, seed, work_dir, run_log, test_bin, cleanup, log_all,
-                 command):
+                 command, fuzz_config):
         """Setup environment for one test and execute this test"""
         try:
             test = TestEnv(test_id, seed, work_dir, run_log, test_bin, cleanup,
-                           log_all)
+                           log_all, fuzz_config)
         except TestException:
             sys.exit(1)
 
@@ -205,7 +208,7 @@ if __name__ == '__main__':
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:kv',
                                        ['command=', 'help', 'binary=', 'seed=',
-                                        'keep_passed', 'verbose'])
+                                        'config=', 'keep_passed', 'verbose'])
     except getopt.error:
         e = sys.exc_info()[1]
         print "Error: %s\n\nTry 'runner.py --help' for more information" % e
@@ -216,6 +219,7 @@ if __name__ == '__main__':
     log_all = False
     test_bin = None
     seed = None
+    config_file = None
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
@@ -230,6 +234,8 @@ if __name__ == '__main__':
             test_bin = os.path.realpath(arg)
         elif opt in ('-s', '--seed'):
             seed = arg
+        elif opt == '--config':
+            config_file = arg
 
     if not len(args) == 2:
         print "Missed parameter\nTry 'runner.py --help' " \
@@ -257,12 +263,26 @@ if __name__ == '__main__':
     for idx, item in enumerate(command):
         if item == 'TEST_IMG':
             command[idx] = 'test_image'
+    # Read fuzzer configuration
+    if config_file is None:
+        fuzz_config = None
+    else:
+        fuzz_config = []
+        config = ConfigParser.RawConfigParser()
+        config.read(config_file)
+        for s in config.sections():
+            opt_list = config.options(s)
+            if len(opt_list) == 0:
+                fuzz_config.append([s])
+            else:
+                for o in opt_list:
+                    fuzz_config.append([s, o])
     # If a seed is specified, only one test will be executed.
     # Otherwise runner will terminate after a keyboard interruption
     for test_id in count(1):
         try:
             run_test(str(test_id), seed, work_dir, run_log, test_bin, cleanup,
-                     log_all, command)
+                     log_all, command, fuzz_config)
         except (KeyboardInterrupt, SystemExit):
             sys.exit(1)
 
