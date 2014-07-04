@@ -50,19 +50,8 @@ Example,
 
         [feature_name_table_ext]
 
+If all fields in a section are expected to be fuzzed, leave the section empty.
 Option values play no role and added just for compatibility.
-
-The configuration file has the next interpretation:
-
-    1. If a section has no options, then some random portion of fields of
-    the image element specified as the section name will be fuzzed every test.
-    The same behavior is applied for the entire image if no configuration is
-    used. This case is useful for the test specialization.
-
-    2. When a section has options, then all fields specified in these options
-    are always fuzzed for every test. This case is useful for regression
-    testing.
-
 Full list of supported fields are available in image-fuzzer/docs/fuzzer.conf.
 
 
@@ -86,6 +75,16 @@ regenerated.
 
 'layout.py' creates a random valid image, fuzzes a random subset of the image
 fields by 'fuzz.py' module and writes a fuzzed image to the file specified.
+If a fuzzer configuration is specified, then it has the next interpretation:
+
+    1. If a section has no options, then some random portion of fields of
+    the image element specified as the section name will be fuzzed every test.
+    The same behavior is applied for the entire image if no configuration is
+    used. This case is useful for the test specialization.
+
+    2. When a section has options, then all fields specified in these options
+    are always fuzzed for every test. This case is useful for regression
+    testing.
 
 For now only header fields and header extensions are generated, the remaining
 file is filled with zeros.
@@ -97,9 +96,19 @@ Module interfaces
 * Test runner/image fuzzer
 
 The runner calls an image generator specifying the path to a test image file.
-An image generator is expected to provide a 'create_image(test_img_path)'
+An image generator is expected to provide a
+   'create_image(test_img_path, fuzz_config=None)'
 method that creates a test image and writes it to the specified file. The file
 should be created if it doesn't exist or overwritten otherwise.
+fuzz_config has a form of a list of lists. Every sublist can have one
+or two elements: first element is a name of a parent image element, second one
+if exists is a name of a field in this element.
+Example,
+        [['header', 'l1_table_offset'],
+         ['header', 'nb_snapshots'],
+         ['feature_name_table_ext']]
+
+Full list of available names can be found in docs/fuzzer.conf.
 Random seed is set by the runner at every test execution for the regression
 purpose, so an image generator is not recommended to modify it internally.
 
