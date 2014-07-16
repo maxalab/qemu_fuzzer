@@ -1,3 +1,21 @@
+# Specification for the fuzz testing tool
+#
+# Copyright (C) 2014 Maria Kustova <maria.k@catit.be>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 Image fuzzer
 ============
 
@@ -16,10 +34,10 @@ Test runner
 The test runner generates test images, executes tests utilizing generated
 images, indicates their results and collects all test related artifacts (logs,
 core dumps, test images).
-The test means one start of a system under test (SUT), e.g. qemu-io, with
-specified arguments and one test image.
+The test means execution of all available commands under test with the same
+generated test image.
 By default, the test runner generates new tests and executes them until
-keyboard interruption. But if a test seed is specified via the '-s' runner
+keyboard interruption. But if a test seed is specified via the '--seed' runner
 parameter, then only one test with this seed will be executed, after its finish
 the runner will exit.
 
@@ -33,26 +51,48 @@ assumes that core dumps will be generated in the current working directory.
 For comprehensive test results, please, set up your test environment
 properly.
 
-Path to a SUT can be specified via the '--binary' parameter of the test runner.
-If no SUT is provided, then the runner tries to get it from environment
-variables (now only qemu_img).If the environment check fails the runner will
-use qemu-img installed in system paths.
+Paths to binaries under test (SUTs) qemu-img and qemu-io are retrieved from
+environment variables. If the environment check fails the runner will
+use SUTs installed in system paths.
+qemu-img is required for creation of backing files, so it's mandatory to set
+the related environment variable even if qemu-img is not supposed to be tested.
 For details about environment variables see qemu-iotests/check.
 
-The runner accepts files with lists of fields expected to be fuzzed. The file
-has the same structure as regular *.conf or *.ini file. Complex image elements
-having multiple fields should be specified as sections, individual fields as
-options for the sections.
-Example,
-        [header]
-        l1_table_offset=True
-        nb_snapshots=True
+The runner accepts via the '--config' argument JSON objects with lists of
+fields expected to be fuzzed, e.g.
 
-        [feature_name_table_ext]
+       '[["feature_name_table"], ["header", "l1_table_offset"]]'
 
-If all fields in a section are expected to be fuzzed, leave the section empty.
-Option values play no role and added just for compatibility.
-Full list of supported fields are available in image-fuzzer/docs/fuzzer.conf.
+Each sublist can be have one or two strings defining image structure elements.
+In the latter case a parent element should be placed on the first position,
+and a field name on the second one.
+
+The runner accepts lists of commands under test as JSON objects via
+the '--command' argument. Each command is a list containing a SUT and all its
+arguments, e.g.
+
+       runner.py -c '[["qemu-io", "$test_img", "-c", "write $off $len"]]'
+     /tmp/test ../qcow2
+
+For variable arguments next aliases can be used:
+    - $test_img for a fuzzed img
+    - $off for an offset in the fuzzed image
+    - $len for a data size
+
+Values for last two aliases will be generated based on the size of the virtal
+disk in the fuzzed image.
+In case when no commands are specified the runner will execute commands from
+the default list:
+    - qemu-img check
+    - qemu-img info
+    - qemu-img convert
+    - qemu-io -c read
+    - qemu-io -c write
+    - qemu-io -c aio_read
+    - qemu-io -c aio_write
+    - qemu-io -c flush
+    - qemu-io -c discard
+    - qemu-io -c truncate
 
 
 Qcow2 image generator
@@ -65,11 +105,10 @@ interfaces'.
 Qcow2 contains two submodules: fuzz.py and layout.py.
 
 'fuzz.py' contains all fuzzing functions, one per image field. It's assumed
-that
-after code analysis every field will have own constraints for its value. For
-now only universal potentially dangerous values are used, e.g. type limits for
-integers or unsafe symbols as '%s' for strings. For bitmasks random amount of
-bits are set to ones. All fuzzed values are checked on non-equality to the
+that after code analysis every field will have own constraints for its value.
+For now only universal potentially dangerous values are used, e.g. type limits
+for integers or unsafe symbols as '%s' for strings. For bitmasks random amount
+of bits are set to ones. All fuzzed values are checked on non-equality to the
 current valid value of the field. In case of equality the value will be
 regenerated.
 
@@ -77,17 +116,16 @@ regenerated.
 fields by 'fuzz.py' module and writes a fuzzed image to the file specified.
 If a fuzzer configuration is specified, then it has the next interpretation:
 
-    1. If a section has no options, then some random portion of fields of
-    the image element specified as the section name will be fuzzed every test.
+    1. If a list contains a parent image element only, then some random portion
+    of fields of this element will be fuzzed every test.
     The same behavior is applied for the entire image if no configuration is
     used. This case is useful for the test specialization.
 
-    2. When a section has options, then all fields specified in these options
-    are always fuzzed for every test. This case is useful for regression
+    2. If a list contains a parent element and a field name, then a field
+    will be always fuzzed for every test. This case is useful for regression
     testing.
 
-For now only header fields and header extensions are generated, the remaining
-file is filled with zeros.
+For now only header fields and header extensions are generated.
 
 
 Module interfaces
@@ -95,35 +133,26 @@ Module interfaces
 
 * Test runner/image fuzzer
 
-The runner calls an image generator specifying the path to a test image file.
+The runner calls an image generator specifying the path to a test image file,
+path to a backing file and its format and a fuzzer configuration.
 An image generator is expected to provide a
-   'create_image(test_img_path, fuzz_config=None)'
-method that creates a test image and writes it to the specified file. The file
-should be created if it doesn't exist or overwritten otherwise.
+
+   'create_image(test_img_path, backing_file_path=None,
+                 backing_file_format=None, fuzz_config=None)'
+
+method that creates a test image, writes it to the specified file and returns
+the size of the virtual disk.
+The file should be created if it doesn't exist or overwritten otherwise.
 fuzz_config has a form of a list of lists. Every sublist can have one
 or two elements: first element is a name of a parent image element, second one
 if exists is a name of a field in this element.
 Example,
         [['header', 'l1_table_offset'],
          ['header', 'nb_snapshots'],
-         ['feature_name_table_ext']]
+         ['feature_name_table']]
 
-Full list of available names can be found in docs/fuzzer.conf.
 Random seed is set by the runner at every test execution for the regression
 purpose, so an image generator is not recommended to modify it internally.
-
-* Test runner/SUT
-
-A full test command is composed from the SUT, its arguments specified
-via '-c' runner parameter and the name of generated image. To indicate where
-a test image name should be placed TEST_IMG placeholder can be used.
-For example, for the next test command
-
- qemu-img convert -O vmdk fuzzed_image test.vmdk
-
-a call of the image fuzzer will be following:
-
- ./runner.py -b qemu-img -c 'convert -O vmdk TEST_IMG test.vmdk' work_dir qcow2
 
 
 Overall fuzzer requirements
@@ -134,7 +163,6 @@ Input data:
 
  - image template (generator)
  - work directory
- - test run duration (optional)
  - action vector (optional)
  - seed (optional)
  - SUT and its arguments (optional)
@@ -168,15 +196,12 @@ Fuzzer requirements:
     randomly otherwise. As far as it's expected to be rarely changed, the list
     of all possible test commands can be available in the test runner
     internally.
-14. Should accept a test run duration as an argument. Tests should be executed
-    during a minimum period from a test run duration and time while fuzzer can
-    generate different test images
-15. Should support an external cancellation of a test run
-16. Seed and action vector should be logged (for regression purpose)
-17. All files related to test result should be collected: a test image,
+14. Should support an external cancellation of a test run
+15. Seed and action vector should be logged (for regression purpose)
+16. All files related to test result should be collected: a test image,
     SUT logs, fuzzer logs and crash dumps
-18. Should be compatible with python version 2.4-2.7
-19. Usage of external libraries should be limited as much as possible.
+17. Should be compatible with python version 2.4-2.7
+18. Usage of external libraries should be limited as much as possible.
 
 
 Image formats:
