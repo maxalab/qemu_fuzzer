@@ -282,6 +282,14 @@ def header_length(current):
     return selector(current, constraints)
 
 
+def bf_name(current):
+    """Fuzz the backing file name"""
+    constraints = [
+        truncate_string(STRING_V, len(current))
+    ]
+    return selector(current, constraints, 'string')
+
+
 def ext_magic(current):
     """Fuzz magic field of a header extension"""
     constraints = UINT32_V
@@ -294,7 +302,7 @@ def ext_length(current):
     return selector(current, constraints)
 
 
-def bf_data(current):
+def bf_format(current):
     """Fuzz backing file format in the corresponding header extension"""
     constraints = [
         truncate_string(STRING_V, len(current)),
@@ -303,7 +311,7 @@ def bf_data(current):
     return selector(current, constraints, 'string')
 
 
-def feat_type(current):
+def feature_type(current):
     """Fuzz feature type field of a feature name table header extension"""
     constraints = [
         [(0, 255)]
@@ -311,7 +319,7 @@ def feat_type(current):
     return selector(current, constraints)
 
 
-def feat_bit_number(current):
+def feature_bit_number(current):
     """Fuzz bit number field of a feature name table header extension"""
     constraints = [
         [(0, 255)]
@@ -319,10 +327,10 @@ def feat_bit_number(current):
     return selector(current, constraints)
 
 
-def feat_name(current):
+def feature_name(current):
     """Fuzz feature name field of a feature name table header extension"""
     constraints = [
         truncate_string(STRING_V, len(current)),
-        truncate_string(STRING_V, 48)  # Fuzz padding (field length = 48)
+        truncate_string(STRING_V, 46)  # Fuzz padding (field length = 46)
     ]
     return selector(current, constraints, 'string')

@@ -18,15 +18,12 @@
 
 import random
 import struct
-import qcow2.fuzz
+import fuzz
 
 MAX_IMAGE_SIZE = 10*2**20
 # Standard sizes
 UINT32_S = 4
 UINT64_S = 8
-
-# Percentage of fields will be fuzzed
-BIAS = random.uniform(0.2, 0.5)
 
 
 class Field(object):
@@ -84,23 +81,23 @@ class FieldsList(object):
 class Image(object):
     """ Qcow2 image object
 
-    This class allows to create valid qcow2 images with random structure,
-    fuzz them via external qcow2.fuzz module and write to files.
+    This class allows to create qcow2 images with random valid structures and
+    values, fuzz them via external qcow2.fuzz module and write the result to
+    a file
     """
     @staticmethod
     def _size_params():
-        """Generate a random file size aligned to a random correct cluster size
+        """Generate a random image size aligned to a random correct
+        cluster size
         """
         cluster_bits = random.randrange(9, 21)
         cluster_size = 1 << cluster_bits
-        # Minimal image size is equal to 5 clusters as for qcow2 empty image
-        # created by qemu-img
-        file_size = random.randrange(5*cluster_size, MAX_IMAGE_SIZE + 1,
-                                     cluster_size)
-        return [cluster_bits, file_size]
+        img_size = random.randrange(0, MAX_IMAGE_SIZE + 1,
+                                    cluster_size)
+        return [cluster_bits, img_size]
 
     @staticmethod
-    def _header(cluster_bits, img_size):
+    def _header(cluster_bits, img_size, backing_file_name=None):
         """Generate a random valid header"""
         meta_header = [
             ['>4s', 0, "QFI\xfb", 'magic'],
@@ -119,8 +116,8 @@ class Image(object):
             ['>Q', 72, 0, 'incompatible_features'],
             ['>Q', 80, 0, 'compatible_features'],
             ['>Q', 88, 0, 'autoclear_features'],
-            # From the e-mail thread for [PATCH] docs: Define refcount_bits
-            # value: Only refcount_order = 4 is supported by QEMU at the moment
+            # Only refcount_order = 4 is supported by current (07.2014)
+            # implementaation of QEMU
             ['>I', 96, 4, 'refcount_order'],
             ['>I', 100, 0, 'header_length']
         ]
@@ -133,84 +130,114 @@ class Image(object):
             v_header['compatible_features'][0].value = random.getrandbits(1)
             v_header['header_length'][0].value = 104
 
+        max_header_len = struct.calcsize(v_header['header_length'][0].fmt) + \
+                         v_header['header_length'][0].offset
+        end_of_extension_area_len = 2*UINT32_S
+        free_space = (1 << cluster_bits) - (max_header_len +
+                                            end_of_extension_area_len)
+        # If the backing file name specified and there is enough space for it
+        # in the first cluster, then it's placed in the very end of the first
+        # cluster.
+        if (backing_file_name is not None) and \
+           (free_space >= len(backing_file_name)):
+            v_header['backing_file_size'][0].value = len(backing_file_name)
+            v_header['backing_file_offset'][0].value = (1 << cluster_bits) - \
+                                                       len(backing_file_name)
+
         return v_header
 
     @staticmethod
-    def _backing_file_format_ext(header):
-        """Generate a random header extension for name of backing file
-        format
-
-        If the header doesn't contain information about the backing file,
-        this extension is left empty
+    def _backing_file_name(header, backing_file_name=None):
+        """Add the name of the backing file at the offset specified
+        in the header
         """
+        if (backing_file_name is not None) and \
+           (not header['backing_file_offset'][0].value == 0):
+            data_len = len(backing_file_name)
+            data_fmt = '>' + str(data_len) + 's'
+            data_field = FieldsList([
+                [data_fmt, header['backing_file_offset'][0].value,
+                 backing_file_name, 'bf_name']
+            ])
+        else:
+            data_field = FieldsList()
+
+        return data_field
+
+    @staticmethod
+    def _backing_file_format(header, backing_file_fmt=None):
+        """Generate the header extension for the backing file
+        format
+        """
+        # Calculation of the free space available in the first cluster
         offset = struct.calcsize(header['header_length'][0].fmt) + \
                  header['header_length'][0].offset
+        end_of_extension_area_len = 2*UINT32_S
+        high_border = (header['backing_file_offset'][0].value or
+                       ((1 << header['cluster_bits'][0].value) - 1)) - \
+            end_of_extension_area_len
+        free_space = high_border - offset
+        ext_size = 2*UINT32_S + ((len(backing_file_fmt) + 7) & ~7)
 
-        if not header['backing_file_offset'][0].value == 0:
-            # Till real backup image is not supported, a random valid fmt
-            # is set
-            ext_data = random.choice(['raw', 'qcow', 'qcow2', 'qed',
-                                      'cow', 'vdi', 'vmdk', 'vpc',
-                                      'vhdx', 'bochs', 'cloop',
-                                      'dmg', 'parallels'])
-            ext_data_len = len(ext_data)
-            ext_data_padded = '>' + str(ext_data_len) + 's' + \
-                              str(7 - (ext_data_len - 1) % 8) + 'x'
+        if (backing_file_fmt is not None) and (free_space >= ext_size):
+            ext_data_len = len(backing_file_fmt)
+            ext_data_fmt = '>' + str(ext_data_len) + 's'
+            ext_padding_len = 7 - (ext_data_len - 1) % 8
             ext = FieldsList([
                 ['>I', offset, 0xE2792ACA, 'ext_magic'],
                 ['>I', offset + UINT32_S, ext_data_len, 'ext_length'],
-                [ext_data_padded, offset + UINT32_S*2, ext_data,
-                 'bf_data']
+                [ext_data_fmt, offset + UINT32_S*2, backing_file_fmt,
+                 'bf_format']
             ])
-            offset = ext['bf_data'][0].offset + \
-                     struct.calcsize(ext['bf_data'][0].fmt)
+            offset = ext['bf_format'][0].offset + \
+                     struct.calcsize(ext['bf_format'][0].fmt) + ext_padding_len
         else:
             ext = FieldsList()
         return (ext, offset)
 
     @staticmethod
-    def _feature_name_table_ext(header, offset):
+    def _feature_name_table(header, offset):
         """Generate a random header extension for names of features used in
         the image
-
-        If all features bit masks in the header are set to zeroes,
-        this extension is left empty
         """
-        feature_tables = []
-        # Current offset + magic and length fields of the feature table
-        # extension
-        inner_offset = offset + 2*UINT32_S
+        def gen_feat_ids():
+            """Return random feature type and feature bit"""
+            return (random.randint(0, 2), random.randint(0, 63))
 
-        # Each tuple is (bit value in the corresponding header field, feature
-        # type, number of the bit in the header field, feature name)
-        feature_list = [
-            (header['incompatible_features'][0].value & 1, 0,
-             1, 'dirty bit'),
-            (header['incompatible_features'][0].value & 2, 0,
-             2, 'corrupt bit'),
-            (header['compatible_features'][0].value & 1, 1,
-             1, 'lazy refcounts bit')
-        ]
-        for item in feature_list:
-            if not item[0] == 0:
-                name_len = len(item[3])
-                name_padded_fmt = '>' + str(name_len) + 's' + \
-                                  str(46 - name_len) + 'x'
-                feature_tables += [['B', inner_offset, item[1], 'feat_type'],
-                                   ['B', inner_offset + 1,
-                                    item[2], 'feat_bit_number'],
-                                   [name_padded_fmt, inner_offset + 2,
-                                    item[3], 'feat_name']
+        end_of_extension_area_len = 2*UINT32_S
+        high_border = (header['backing_file_offset'][0].value or
+                       (1 << header['cluster_bits'][0].value) - 1) - \
+            end_of_extension_area_len
+        free_space = high_border - offset
+        # Sum of sizes of 'magic' and 'length' header extension fields
+        ext_header_len = 2*UINT32_S
+        fnt_entry_size = 6*UINT64_S
+        num_fnt_entries = min(10, (free_space - ext_header_len)/fnt_entry_size)
+        if not num_fnt_entries == 0:
+            feature_tables = []
+            feature_ids = []
+            inner_offset = offset + ext_header_len
+            feat_name = 'some cool feature'
+            while len(feature_tables) < num_fnt_entries*3:
+                feat_type, feat_bit = gen_feat_ids()
+                # Remove duplicates
+                while (feat_type, feat_bit) in feature_ids:
+                    feat_type, feat_bit = gen_feat_ids()
+                feature_ids.append((feat_type, feat_bit))
+                feat_fmt = '>' + str(len(feat_name)) + 's'
+                feature_tables += [['B', inner_offset,
+                                    feat_type, 'feature_type'],
+                                   ['B', inner_offset + 1, feat_bit,
+                                    'feature_bit_number'],
+                                   [feat_fmt, inner_offset + 2,
+                                    feat_name, 'feature_name']
                 ]
-                inner_offset = inner_offset + 2 + \
-                               struct.calcsize(name_padded_fmt)
-
-        if not len(feature_tables) == 0:
+                inner_offset += fnt_entry_size
             # No padding for the extension is necessary, because
-            # the extension length = 8 + 48*N is multiple of 8
+            # the extension length is multiple of 8
             ext = FieldsList([
                 ['>I', offset, 0x6803f857, 'ext_magic'],
-                ['>I', offset + UINT32_S, len(feature_tables)*48,'ext_length']
+                ['>I', offset + UINT32_S, len(feature_tables)*48, 'ext_length']
             ] + feature_tables)
             offset = inner_offset
         else:
@@ -219,7 +246,7 @@ class Image(object):
         return (ext, offset)
 
     @staticmethod
-    def _end_ext(offset):
+    def _end_of_extension_area(offset):
         """Generate a mandatory header extension marking end of header
         extensions
         """
@@ -227,27 +254,37 @@ class Image(object):
             ['>I', offset, 0, 'ext_magic'],
             ['>I', offset + UINT32_S, 0, 'ext_length']
         ])
-        return (ext, offset)
+        return ext
 
-    def __init__(self):
+    def __init__(self, backing_file_name=None, backing_file_fmt=None):
         """Create a random valid qcow2 image with the correct inner structure
         and allowable values
         """
-        # Image size is necessary for writing, but the field with it can be
-        # fuzzed so it's saved separately.
+        # Image size is saved as an attribute for the runner needs
         cluster_bits, self.image_size = self._size_params()
-        self.header = self._header(cluster_bits, self.image_size)
-        self.backing_file_format_ext, \
-            offset = self._backing_file_format_ext(self.header)
-        self.feature_name_table_ext, \
-            offset = self._feature_name_table_ext(self.header, offset)
-        self.end_ext, offset = self._end_ext(offset)
+        # Saved as attribute, because it's necessary for writing
+        self.cluster_size = 1 << cluster_bits
+        self.header = self._header(cluster_bits, self.image_size,
+                                   backing_file_name)
+        self.backing_file_name = self._backing_file_name(self.header,
+                                                         backing_file_name)
+        self.backing_file_format, \
+            offset = self._backing_file_format(self.header,
+                                               backing_file_fmt)
+        self.feature_name_table, \
+            offset = self._feature_name_table(self.header, offset)
+        self.end_of_extension_area = self._end_of_extension_area(offset)
         # Container for entire image
         self.data = FieldsList()
+        # Percentage of fields will be fuzzed
+        self.bias = random.uniform(0.2, 0.5)
 
     def __iter__(self):
-        return (x for x in [self.header, self.backing_file_format_ext,
-                            self.feature_name_table_ext, self.end_ext])
+        return (x for x in [self.header,
+                            self.backing_file_format,
+                            self.feature_name_table,
+                            self.end_of_extension_area,
+                            self.backing_file_name])
 
     def _join(self):
         """Join all image structure elements as header, tables, etc in one
@@ -263,32 +300,32 @@ class Image(object):
         Without parameters the method fuzzes an entire image.
         If 'fields_to_fuzz' is specified then only fields in this list will be
         fuzzed. 'fields_to_fuzz' can contain both individual fields and more
-        general image elements as header or tables.
-        In the first case the single field will be fuzzed always.
+        general image elements as a header or tables.
+        In the first case the field will be fuzzed always.
         In the second a random subset of fields will be selected and fuzzed.
         """
         def coin():
             """Return boolean value proportional to a portion of fields to be
             fuzzed
             """
-            return random.random() < BIAS
+            return random.random() < self.bias
 
         if fields_to_fuzz is None:
             self._join()
             for field in self.data:
                 if coin():
-                    field.value = getattr(qcow2.fuzz, field.name)(field.value)
+                    field.value = getattr(fuzz, field.name)(field.value)
         else:
             for item in fields_to_fuzz:
                 if len(item) == 1:
                     for field in self.__dict__[item[0]]:
                         if coin():
-                            field.value = getattr(qcow2.fuzz,
+                            field.value = getattr(fuzz,
                                                   field.name)(field.value)
                 else:
                     for field in self.__dict__[item[0]][item[1]]:
                         try:
-                            field.value = getattr(qcow2.fuzz, field.name)(
+                            field.value = getattr(fuzz, field.name)(
                                 field.value)
                         except AttributeError:
                             # Some fields can be skipped depending on
@@ -300,21 +337,23 @@ class Image(object):
     def write(self, filename):
         """Writes an entire image to the file"""
         image_file = open(filename, 'w')
-        # Create an empty image
-        # (sparse if FS supports it or preallocated otherwise)
-        image_file.seek(self.image_size - 1)
-        image_file.write("\0")
         self._join()
         for field in self.data:
-            print field
             image_file.seek(field.offset)
             image_file.write(struct.pack(field.fmt, field.value))
-
+        image_file.seek(0, 2)
+        size = image_file.tell()
+        roundup = (size + self.cluster_size - 1) & ~(self.cluster_size - 1)
+        if roundup > size:
+            image_file.seek(roundup - 1)
+            image_file.write("\0")
         image_file.close()
 
 
-def create_image(test_img_path, fields_to_fuzz=None):
+def create_image(test_img_path, backing_file_name=None, backing_file_fmt=None,
+                 fields_to_fuzz=None):
     """Create a fuzzed image and write it to the specified file"""
-    image = Image()
+    image = Image(backing_file_name, backing_file_fmt)
     image.fuzz(fields_to_fuzz)
     image.write(test_img_path)
+    return image.image_size
