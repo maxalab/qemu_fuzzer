@@ -262,7 +262,7 @@ class Image(object):
         """
         # Image size is saved as an attribute for the runner needs
         cluster_bits, self.image_size = self._size_params()
-        # Saved as attribute, because it's necessary for writing
+        # Saved as an attribute, because it's necessary for writing
         self.cluster_size = 1 << cluster_bits
         self.header = self._header(cluster_bits, self.image_size,
                                    backing_file_name)
