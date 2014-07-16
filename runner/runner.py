@@ -19,13 +19,19 @@
 #
 
 import sys, os, signal
-from time import time
 import subprocess
 import random
 from itertools import count
 from shutil import rmtree
 import getopt
-import ConfigParser
+try:
+    import json
+except ImportError:
+    try:
+        import simplejson as json
+    except ImportError:
+        print "Warning: Module for JSON processing is not found.\n" + \
+            "'--config' and '--command' options are not supported."
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
 
@@ -57,8 +63,9 @@ class TestException(Exception):
 class TestEnv(object):
     """ Trivial test object
 
-    The class sets up test environment, generates a test image and executes
-    application under tests with specified arguments and a test image provided.
+    The class sets up test environment, generates backing and test images
+    and executes application under tests with specified arguments and a test
+    image provided.
     All logs are collected.
     Summary log will contain short descriptions and statuses of tests in
     a run.
@@ -66,27 +73,45 @@ class TestEnv(object):
     to the summary log.
     """
 
-    def __init__(self, test_id, seed, work_dir, run_log, exec_bin=None,
-                 cleanup=True, log_all=False, fuzz_config=None):
+    def __init__(self, test_id, seed, work_dir, run_log,
+                 cleanup=True, log_all=False):
         """Set test environment in a specified work directory.
 
-        Path to qemu_img will be retrieved from 'QEMU_IMG' environment
-        variable, if a test binary is not specified.
+        Path to qemu-img and qemu-io will be retrieved from 'QEMU_IMG' and
+        'QEMU_IO' environment variables
         """
-
         if seed is not None:
             self.seed = seed
         else:
-            self.seed = hash(time())
+            self.seed = str(hash(random.randint(0, sys.maxint)))
+        random.seed(self.seed)
 
         self.init_path = os.getcwd()
         self.work_dir = work_dir
         self.current_dir = os.path.join(work_dir, 'test-' + test_id)
-        if exec_bin is not None:
-            self.exec_bin = exec_bin.strip().split(' ')
-        else:
-            self.exec_bin = \
-                os.environ.get('QEMU_IMG', 'qemu-img').strip().split(' ')
+        self.qemu_img = \
+                        os.environ.get('QEMU_IMG', 'qemu-img')\
+                                  .strip().split(' ')
+        self.qemu_io = \
+                       os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
+        self.commands = [['qemu-img', 'check', '-f', 'qcow2', '$test_img'],
+                         ['qemu-img', 'info', '-f', 'qcow2', '$test_img'],
+                         ['qemu-io', '$test_img', '-c', 'read $off $len'],
+                         ['qemu-io', '$test_img', '-c', 'write $off $len'],
+                         ['qemu-io', '$test_img', '-c',
+                          'aio_read $off $len'],
+                         ['qemu-io', '$test_img', '-c',
+                          'aio_write $off $len'],
+                         ['qemu-io', '$test_img', '-c', 'flush'],
+                         ['qemu-io', '$test_img', '-c',
+                          'discard $off $len'],
+                         ['qemu-io', '$test_img', '-c',
+                          'truncate $off']]
+        for fmt in ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file',
+                    'qed', 'vpc']:
+            self.commands.append(
+                         ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
+                          '$test_img', 'converted_image.' + fmt])
 
         try:
             os.makedirs(self.current_dir)
@@ -98,54 +123,96 @@ class TestEnv(object):
             raise TestException
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
         self.parent_log = open(run_log, "a")
-        self.result = False
+        self.result = []
         self.cleanup = cleanup
         self.log_all = log_all
-        self.fuzz_config = fuzz_config
 
     def _test_app(self, q_args):
         """ Start application under test with specified arguments and return
-        an exit code or a kill signal depending on result of an execution.
+        an exit code or a kill signal depending on the result of execution.
         """
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(self.exec_bin + q_args,
-                               stdin=devnull, stdout=self.log, stderr=self.log)
+        return subprocess.call(q_args, stdin=devnull, stdout=self.log,
+                               stderr=self.log)
 
-    def execute(self, q_args):
+    def _create_backing_file(self):
+        """Create a backing file in the current directory and return
+        its name and file format
+
+        Format of a backing file is randomly chosen from all formats supported
+        by 'qemu-img create'
+        """
+        # All formats qemu-img can create images of.
+        backing_file_fmt = random.choice(['raw', 'vmdk', 'vdi', 'cow', 'qcow2',
+                                          'file', 'qed', 'vpc'])
+        backing_file_name = 'backing_img.' + backing_file_fmt
+        # Size of the backing file varies from 1 to 10 MB
+        backing_file_size = random.randint(1, 10)*(1 << 20)
+        cmd = self.qemu_img + ['create', '-f', backing_file_fmt,
+                               backing_file_name, str(backing_file_size)]
+        devnull = open('/dev/null', 'r+')
+        retcode = subprocess.call(cmd, stdin=devnull, stdout=self.log,
+                                  stderr=self.log)
+        if retcode == 0:
+            return [backing_file_name, backing_file_fmt]
+        else:
+            return [None, None]
+
+    def execute(self, input_commands=None, fuzz_config=None):
         """ Execute a test.
 
-        The method creates a test image, runs test app and analyzes its exit
-        status. If the application was killed by a signal, the test is marked
-        as failed.
+        The method creates backing and test images, runs test app and analyzes
+        its exit status. If the application was killed by a signal, the test
+        is marked as failed.
         """
-        os.chdir(self.current_dir)
-        # Seed initialization should be as close to image generation call
-        # as posssible to avoid a corruption of random sequence
-        random.seed(self.seed)
-        image_generator.create_image('test_image', self.fuzz_config)
-        test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
-                       % (self.seed, " ".join(q_args), self.current_dir)
-        try:
-            retcode = self._test_app(q_args)
-        except OSError:
-            e = sys.exc_info()[1]
-            multilog(test_summary + "Error: Start of '%s' failed. " \
-                     "Reason: %s\n\n" % (os.path.basename(self.exec_bin[0]),
-                                         e[1]),
-                     sys.stderr, self.log, self.parent_log)
-            raise TestException
-
-        if retcode < 0:
-            multilog(test_summary + "FAIL: Test terminated by signal %s\n\n"
-                     % str_signal(-retcode), sys.stderr, self.log,
-                     self.parent_log)
-        elif self.log_all:
-            multilog(test_summary + "PASS: Application exited with the code" +
-                     " '%d'\n\n" % retcode, sys.stdout, self.log,
-                     self.parent_log)
-            self.result = True
+        if input_commands is None:
+            commands = self.commands
         else:
-            self.result = True
+            commands = input_commands
+        os.chdir(self.current_dir)
+        backing_file_name, backing_file_fmt = self._create_backing_file()
+        img_size = image_generator.create_image('test_image',
+                                                backing_file_name,
+                                                backing_file_fmt,
+                                                fuzz_config)
+        for item in commands:
+            start = random.randint(0, img_size)
+            end = random.randint(start, img_size)
+            current_cmd = [s for s in
+                           self.__dict__[item[0].replace('-', '_')]]
+            # Replace all placeholders with their real values
+            for v in item[1:]:
+                c = v.replace('$test_img', 'test_image').\
+                    replace('$off', str(start)).\
+                    replace('$len', str(end - start))
+                current_cmd.append(c)
+            # Log string with the test header
+            test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
+                           "Backing file: %s\n" \
+                           % (self.seed, " ".join(current_cmd),
+                              self.current_dir, backing_file_name)
+            try:
+                retcode = self._test_app(current_cmd)
+            except OSError:
+                e = sys.exc_info()[1]
+                multilog(test_summary + "Error: Start of '%s' failed. " \
+                         "Reason: %s\n\n" % (os.path.basename(
+                             current_cmd[0]), e[1]),
+                         sys.stderr, self.log, self.parent_log)
+                raise TestException
+
+            if retcode < 0:
+                multilog(test_summary + "FAIL: Test terminated by signal " +
+                         "%s\n\n" % str_signal(-retcode), sys.stderr, self.log,
+                         self.parent_log)
+                self.result.append(False)
+            elif self.log_all:
+                multilog(test_summary + "PASS: Application exited with the " +
+                         "code '%d'\n\n" % retcode, sys.stdout, self.log,
+                         self.parent_log)
+                self.result.append(True)
+            else:
+                self.result.append(True)
 
     def finish(self):
         """ Restore environment after a test execution. Remove folders of
@@ -154,7 +221,7 @@ class TestEnv(object):
         self.log.close()
         self.parent_log.close()
         os.chdir(self.init_path)
-        if self.result and self.cleanup:
+        if (False not in self.result) and self.cleanup:
             rmtree(self.current_dir)
 
 if __name__ == '__main__':
@@ -164,33 +231,56 @@ if __name__ == '__main__':
         Usage: runner.py [OPTION...] TEST_DIR IMG_GENERATOR
 
         Set up test environment in TEST_DIR and run a test in it. A module for
-        test image generation should be specified via IMG_GENERATOR. Use
-        TEST_IMG alias to mark the position in the command where a test image
-        name should be placed.
+        test image generation should be specified via IMG_GENERATOR.
         Example:
-        python runner.py -b ./qemu-img -c 'info TEST_IMG' /tmp/test ../qcow2
+        runner.py -c '[["qemu-img", "info", "$test_img"]]' /tmp/test ../qcow2
 
         Optional arguments:
           -h, --help                    display this help and exit
-          -b, --binary=PATH             path to the application under test,
-                                        by default "qemu-img" in PATH or
-                                        QEMU_IMG environment variables
-          -c, --command=STRING          execute the tested application
-                                        with arguments specified,
-                                        by default STRING="check"
+          -c, --command=JSON            run tests for all commands specified in
+                                        the JSON object
           -s, --seed=STRING             seed for a test image generation,
                                         by default will be generated randomly
-          --config=FILE                 take fuzzer configuration from FILE
+          --config=JSON                 take fuzzer configuration from the JSON
+                                        object
           -k, --keep_passed             don't remove folders of passed tests
           -v, --verbose                 log information about passed tests
+
+        JSON objects:
+
+        '--command' accepts a JSON object containing a list of commands.
+        Each command presents an application under test with all its paramaters
+        as a list of strings, e.g.
+          ["qemu-io", "$test_img", "-c", "write $off $len"]
+
+        Supported application aliases: 'qemu-img' and 'qemu-io'.
+        Supported argument aliases: $test_img for the fuzzed image, $off
+        for an offset, $len for length.
+
+        Values for $off and $len will be generated based on the virtual disk
+        size of the fuzzed image
+        Paths to 'qemu-img' and 'qemu-io' are retrevied from 'QEMU_IMG' and
+        'QEMU_IO' environment variables
+
+        '--config' accepts a JSON object containing a list of fields to be
+        fuzzed, e.g.
+          [["header"], ["header", "version"]]
+        Each of the list elements can consist of a complex image element only
+        as ["header"] or ["feature_name_table"] or an exact field as
+        ["header", "version"]. In the first case random portion of the element
+        fields will be fuzzed, in the second one the specified field will be
+        fuzzed always.
+
+        If '--config' argument is specified, fields not listed in
+        the configuration object will not be fuzzed.
         """
 
-    def run_test(test_id, seed, work_dir, run_log, test_bin, cleanup, log_all,
+    def run_test(test_id, seed, work_dir, run_log, cleanup, log_all,
                  command, fuzz_config):
         """Setup environment for one test and execute this test"""
         try:
-            test = TestEnv(test_id, seed, work_dir, run_log, test_bin, cleanup,
-                           log_all, fuzz_config)
+            test = TestEnv(test_id, seed, work_dir, run_log, cleanup,
+                           log_all)
         except TestException:
             sys.exit(1)
 
@@ -198,7 +288,7 @@ if __name__ == '__main__':
         # block
         try:
             try:
-                test.execute(command)
+                test.execute(command, fuzz_config)
             # Silent exit on user break
             except TestException:
                 sys.exit(1)
@@ -206,36 +296,45 @@ if __name__ == '__main__':
             test.finish()
 
     try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hb:s:kv',
-                                       ['command=', 'help', 'binary=', 'seed=',
-                                        'config=', 'keep_passed', 'verbose'])
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hs:kv',
+                                       ['command=', 'help', 'seed=', 'config=',
+                                        'keep_passed', 'verbose'])
     except getopt.error:
         e = sys.exc_info()[1]
         print "Error: %s\n\nTry 'runner.py --help' for more information" % e
         sys.exit(1)
 
-    command = ['check']
+    command = None
     cleanup = True
     log_all = False
-    test_bin = None
     seed = None
-    config_file = None
+    config = None
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
             sys.exit()
         elif opt in ('-c', '--command'):
-            command = arg.split(" ")
+            try:
+                command = json.loads(arg)
+            except (TypeError, ValueError, NameError):
+                e = sys.exc_info()[1]
+                print "Error: JSON object with test commands cannot be loaded"\
+                    "\nReason: %s" % e
+                sys.exit(1)
         elif opt in ('-k', '--keep_passed'):
             cleanup = False
         elif opt in ('-v', '--verbose'):
             log_all = True
-        elif opt in ('-b', '--binary'):
-            test_bin = os.path.realpath(arg)
         elif opt in ('-s', '--seed'):
             seed = arg
         elif opt == '--config':
-            config_file = arg
+            try:
+                config = json.loads(arg)
+            except (TypeError, ValueError, NameError):
+                e = sys.exc_info()[1]
+                print "Error: JSON object with fuzzer configuration " \
+                    "cannot be loaded\nReason: %s" % e
+                sys.exit(1)
 
     if not len(args) == 2:
         print "Missed parameter\nTry 'runner.py --help' " \
@@ -258,31 +357,12 @@ if __name__ == '__main__':
         print "Error: The image generator '%s' cannot be imported.\n" \
             "Reason: %s" % (generator_name, e)
         sys.exit(1)
-
-    # Replace test image alias with its real name
-    for idx, item in enumerate(command):
-        if item == 'TEST_IMG':
-            command[idx] = 'test_image'
-    # Read fuzzer configuration
-    if config_file is None:
-        fuzz_config = None
-    else:
-        fuzz_config = []
-        config = ConfigParser.RawConfigParser()
-        config.read(config_file)
-        for s in config.sections():
-            opt_list = config.options(s)
-            if len(opt_list) == 0:
-                fuzz_config.append([s])
-            else:
-                for o in opt_list:
-                    fuzz_config.append([s, o])
     # If a seed is specified, only one test will be executed.
     # Otherwise runner will terminate after a keyboard interruption
     for test_id in count(1):
         try:
-            run_test(str(test_id), seed, work_dir, run_log, test_bin, cleanup,
-                     log_all, command, fuzz_config)
+            run_test(str(test_id), seed, work_dir, run_log, cleanup,
+                     log_all, command, config)
         except (KeyboardInterrupt, SystemExit):
             sys.exit(1)
 
