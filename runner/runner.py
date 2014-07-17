@@ -178,8 +178,7 @@ class TestEnv(object):
         for item in commands:
             start = random.randint(0, img_size)
             end = random.randint(start, img_size)
-            current_cmd = [s for s in
-                           self.__dict__[item[0].replace('-', '_')]]
+            current_cmd = list(self.__dict__[item[0].replace('-', '_')])
             # Replace all placeholders with their real values
             for v in item[1:]:
                 c = v.replace('$test_img', 'test_image').\
