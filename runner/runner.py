@@ -83,7 +83,7 @@ class TestEnv(object):
         if seed is not None:
             self.seed = seed
         else:
-            self.seed = str(hash(random.randint(0, sys.maxint)))
+            self.seed = str(random.randint(0, sys.maxint))
         random.seed(self.seed)
 
         self.init_path = os.getcwd()
@@ -115,15 +115,14 @@ class TestEnv(object):
 
         try:
             os.makedirs(self.current_dir)
-        except OSError:
-            e = sys.exc_info()[1]
+        except OSError, e:
             print >>sys.stderr, \
                 "Error: The working directory '%s' cannot be used. Reason: %s"\
                 % (self.work_dir, e[1])
             raise TestException
         self.log = open(os.path.join(self.current_dir, "test.log"), "w")
         self.parent_log = open(run_log, "a")
-        self.result = []
+        self.failed = False
         self.cleanup = cleanup
         self.log_all = log_all
 
@@ -192,8 +191,7 @@ class TestEnv(object):
                               self.current_dir, backing_file_name)
             try:
                 retcode = self._test_app(current_cmd)
-            except OSError:
-                e = sys.exc_info()[1]
+            except OSError, e:
                 multilog(test_summary + "Error: Start of '%s' failed. " \
                          "Reason: %s\n\n" % (os.path.basename(
                              current_cmd[0]), e[1]),
@@ -204,14 +202,12 @@ class TestEnv(object):
                 multilog(test_summary + "FAIL: Test terminated by signal " +
                          "%s\n\n" % str_signal(-retcode), sys.stderr, self.log,
                          self.parent_log)
-                self.result.append(False)
-            elif self.log_all:
-                multilog(test_summary + "PASS: Application exited with the " +
-                         "code '%d'\n\n" % retcode, sys.stdout, self.log,
-                         self.parent_log)
-                self.result.append(True)
+                self.failed = True
             else:
-                self.result.append(True)
+                if self.log_all:
+                    multilog(test_summary + "PASS: Application exited with" + \
+                             " the code '%d'\n\n" % retcode, sys.stdout,
+                             self.log, self.parent_log)
 
     def finish(self):
         """ Restore environment after a test execution. Remove folders of
@@ -220,7 +216,7 @@ class TestEnv(object):
         self.log.close()
         self.parent_log.close()
         os.chdir(self.init_path)
-        if (False not in self.result) and self.cleanup:
+        if self.cleanup and not self.failed:
             rmtree(self.current_dir)
 
 if __name__ == '__main__':
@@ -247,9 +243,9 @@ if __name__ == '__main__':
 
         JSON objects:
 
-        '--command' accepts a JSON object containing a list of commands.
-        Each command presents an application under test with all its paramaters
-        as a list of strings, e.g.
+        '--command' accepts a JSON list of commands. Each command presents
+        an application under test with all its paramaters as a list of strings,
+        e.g.
           ["qemu-io", "$test_img", "-c", "write $off $len"]
 
         Supported application aliases: 'qemu-img' and 'qemu-io'.
@@ -261,8 +257,7 @@ if __name__ == '__main__':
         Paths to 'qemu-img' and 'qemu-io' are retrevied from 'QEMU_IMG' and
         'QEMU_IO' environment variables
 
-        '--config' accepts a JSON object containing a list of fields to be
-        fuzzed, e.g.
+        '--config' accepts a JSON list of fields to be fuzzed, e.g.
           [["header"], ["header", "version"]]
         Each of the list elements can consist of a complex image element only
         as ["header"] or ["feature_name_table"] or an exact field as
@@ -298,8 +293,7 @@ if __name__ == '__main__':
         opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hs:kv',
                                        ['command=', 'help', 'seed=', 'config=',
                                         'keep_passed', 'verbose'])
-    except getopt.error:
-        e = sys.exc_info()[1]
+    except getopt.error, e:
         print "Error: %s\n\nTry 'runner.py --help' for more information" % e
         sys.exit(1)
 
@@ -315,8 +309,7 @@ if __name__ == '__main__':
         elif opt in ('-c', '--command'):
             try:
                 command = json.loads(arg)
-            except (TypeError, ValueError, NameError):
-                e = sys.exc_info()[1]
+            except (TypeError, ValueError, NameError), e:
                 print "Error: JSON object with test commands cannot be loaded"\
                     "\nReason: %s" % e
                 sys.exit(1)
@@ -329,14 +322,13 @@ if __name__ == '__main__':
         elif opt == '--config':
             try:
                 config = json.loads(arg)
-            except (TypeError, ValueError, NameError):
-                e = sys.exc_info()[1]
+            except (TypeError, ValueError, NameError), e:
                 print "Error: JSON object with fuzzer configuration " \
                     "cannot be loaded\nReason: %s" % e
                 sys.exit(1)
 
     if not len(args) == 2:
-        print "Missed parameter\nTry 'runner.py --help' " \
+        print "Expected two parameters\nTry 'runner.py --help' " \
             "for more information"
         sys.exit(1)
 
@@ -351,8 +343,7 @@ if __name__ == '__main__':
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
         image_generator = __import__(generator_name)
-    except ImportError:
-        e = sys.exc_info()[1]
+    except ImportError, e:
         print "Error: The image generator '%s' cannot be imported.\n" \
             "Reason: %s" % (generator_name, e)
         sys.exit(1)

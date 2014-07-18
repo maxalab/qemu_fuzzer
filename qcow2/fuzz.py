@@ -79,16 +79,22 @@ def truncate_string(strings, length):
         return strings[:length]
 
 
+def validator(current, pick, choices):
+    """Returns a value not equal to the current selected by the pick
+    function from choises
+    """
+    while True:
+        val = pick(choices)
+        if not val == current:
+            return val
+
+
 def int_validator(current, intervals):
     """Return a random value from intervals not equal to the current.
 
     This function is useful for selection from valid values except current one.
     """
-    val = random_from_intervals(intervals)
-    if val == current:
-        return int_validator(current, intervals)
-    else:
-        return val
+    return validator(current, random_from_intervals, intervals)
 
 
 def bit_validator(current, bit_ranges):
@@ -96,12 +102,7 @@ def bit_validator(current, bit_ranges):
 
     This function is useful for selection from valid values except current one.
     """
-
-    val = random_bits(bit_ranges)
-    if val == current:
-        return bit_validator(current, bit_ranges)
-    else:
-        return val
+    return validator(current, random_bits, bit_ranges)
 
 
 def string_validator(current, strings):
@@ -109,24 +110,16 @@ def string_validator(current, strings):
 
     This function is useful for selection from valid values except current one.
     """
-    val = random.choice(strings)
-    if val == current:
-        return string_validator(current, strings)
-    else:
-        return val
+    return validator(current, random.choice, strings)
 
 
-def selector(current, constraints, fmt=None):
+def selector(current, constraints, validate=int_validator):
     """Select one value from all defined by constraints
 
     Each constraint produces one random value satisfying to it. The function
     randomly selects one value satisfying at least one constraint (depending on
     constraints overlaps).
     """
-    validate = {
-        'bitmask': bit_validator,
-        'string': string_validator
-    }.get(fmt, int_validator)
 
     def iter_validate(c):
         """Apply validate() only to constraints represented as lists
@@ -247,7 +240,7 @@ def incompatible_features(current):
         [(0, 1)],  # allowable values
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 'bitmask')
+    return selector(current, constraints, bit_validator)
 
 
 def compatible_features(current):
@@ -255,7 +248,7 @@ def compatible_features(current):
     constraints = [
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 'bitmask')
+    return selector(current, constraints, bit_validator)
 
 
 def autoclear_features(current):
@@ -263,7 +256,7 @@ def autoclear_features(current):
     constraints = [
         [(0, UINT64_M)]
     ]
-    return selector(current, constraints, 'bitmask')
+    return selector(current, constraints, bit_validator)
 
 
 def refcount_order(current):
@@ -287,7 +280,7 @@ def bf_name(current):
     constraints = [
         truncate_string(STRING_V, len(current))
     ]
-    return selector(current, constraints, 'string')
+    return selector(current, constraints, string_validator)
 
 
 def ext_magic(current):
@@ -308,7 +301,7 @@ def bf_format(current):
         truncate_string(STRING_V, len(current)),
         truncate_string(STRING_V, (len(current) + 7) & ~7)  # Fuzz padding
     ]
-    return selector(current, constraints, 'string')
+    return selector(current, constraints, string_validator)
 
 
 def feature_type(current):
@@ -333,4 +326,4 @@ def feature_name(current):
         truncate_string(STRING_V, len(current)),
         truncate_string(STRING_V, 46)  # Fuzz padding (field length = 46)
     ]
-    return selector(current, constraints, 'string')
+    return selector(current, constraints, string_validator)

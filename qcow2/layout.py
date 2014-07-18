@@ -117,7 +117,7 @@ class Image(object):
             ['>Q', 80, 0, 'compatible_features'],
             ['>Q', 88, 0, 'autoclear_features'],
             # Only refcount_order = 4 is supported by current (07.2014)
-            # implementaation of QEMU
+            # implementation of QEMU
             ['>I', 96, 4, 'refcount_order'],
             ['>I', 100, 0, 'header_length']
         ]
