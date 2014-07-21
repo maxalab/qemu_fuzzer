@@ -323,7 +323,7 @@ if __name__ == '__main__':
             try:
                 config = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print "Error: JSON array with fuzzer configuration " \
+                print "Error: JSON array with the fuzzer configuration " \
                     "cannot be loaded\nReason: %s" % e
                 sys.exit(1)
 

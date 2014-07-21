@@ -65,7 +65,7 @@ def random_bits(bit_ranges):
         bit_numbers += random.sample(range(rng[0], rng[1] + 1),
                                      random.randint(0, rng[1] - rng[0] + 1))
     val = 0
-    # Set bits on selected possitions to ones
+    # Set bits on selected positions to ones
     for bit in bit_numbers:
         val |= 1 << bit
     return val
@@ -81,7 +81,7 @@ def truncate_string(strings, length):
 
 def validator(current, pick, choices):
     """Returns a value not equal to the current selected by the pick
-    function from choises
+    function from choices
     """
     while True:
         val = pick(choices)
