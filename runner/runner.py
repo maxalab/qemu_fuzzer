@@ -233,17 +233,17 @@ if __name__ == '__main__':
         Optional arguments:
           -h, --help                    display this help and exit
           -c, --command=JSON            run tests for all commands specified in
-                                        the JSON object
+                                        the JSON array
           -s, --seed=STRING             seed for a test image generation,
                                         by default will be generated randomly
           --config=JSON                 take fuzzer configuration from the JSON
-                                        object
+                                        array
           -k, --keep_passed             don't remove folders of passed tests
           -v, --verbose                 log information about passed tests
 
-        JSON objects:
+        JSON:
 
-        '--command' accepts a JSON list of commands. Each command presents
+        '--command' accepts a JSON array of commands. Each command presents
         an application under test with all its paramaters as a list of strings,
         e.g.
           ["qemu-io", "$test_img", "-c", "write $off $len"]
@@ -257,8 +257,8 @@ if __name__ == '__main__':
         Paths to 'qemu-img' and 'qemu-io' are retrevied from 'QEMU_IMG' and
         'QEMU_IO' environment variables
 
-        '--config' accepts a JSON list of fields to be fuzzed, e.g.
-          [["header"], ["header", "version"]]
+        '--config' accepts a JSON array of fields to be fuzzed, e.g.
+          '[["header"], ["header", "version"]]'
         Each of the list elements can consist of a complex image element only
         as ["header"] or ["feature_name_table"] or an exact field as
         ["header", "version"]. In the first case random portion of the element
@@ -266,7 +266,7 @@ if __name__ == '__main__':
         fuzzed always.
 
         If '--config' argument is specified, fields not listed in
-        the configuration object will not be fuzzed.
+        the configuration array will not be fuzzed.
         """
 
     def run_test(test_id, seed, work_dir, run_log, cleanup, log_all,
@@ -310,7 +310,7 @@ if __name__ == '__main__':
             try:
                 command = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print "Error: JSON object with test commands cannot be loaded"\
+                print "Error: JSON array of test commands cannot be loaded"\
                     "\nReason: %s" % e
                 sys.exit(1)
         elif opt in ('-k', '--keep_passed'):
@@ -323,7 +323,7 @@ if __name__ == '__main__':
             try:
                 config = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print "Error: JSON object with fuzzer configuration " \
+                print "Error: JSON array with fuzzer configuration " \
                     "cannot be loaded\nReason: %s" % e
                 sys.exit(1)
 

@@ -58,8 +58,8 @@ qemu-img is required for creation of backing files, so it's mandatory to set
 the related environment variable if it's not installed in the system path.
 For details about environment variables see qemu-iotests/check.
 
-The runner accepts via the '--config' argument JSON objects with lists of
-fields expected to be fuzzed, e.g.
+The runner accepts via the '--config' argument a JSON array of fields expected
+to be fuzzed, e.g.
 
        '[["feature_name_table"], ["header", "l1_table_offset"]]'
 
@@ -67,7 +67,7 @@ Each sublist can be have one or two strings defining image structure elements.
 In the latter case a parent element should be placed on the first position,
 and a field name on the second one.
 
-The runner accepts lists of commands under test as JSON objects via
+The runner accepts a list of commands under test as a JSON array via
 the '--command' argument. Each command is a list containing a SUT and all its
 arguments, e.g.
 
