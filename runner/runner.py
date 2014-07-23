@@ -21,8 +21,8 @@
 import sys, os, signal
 import subprocess
 import random
+import shutil
 from itertools import count
-from shutil import rmtree
 import getopt
 try:
     import json
@@ -107,7 +107,9 @@ class TestEnv(object):
                           'discard $off $len'],
                          ['qemu-io', '$test_img', '-c',
                           'truncate $off']]
-        for fmt in ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file',
+        # VMDK format is skipped because such conversion requires
+        # a pregenerated vmdk file
+        for fmt in ['raw', 'vdi', 'cow', 'qcow2', 'file',
                     'qed', 'vpc']:
             self.commands.append(
                          ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
@@ -170,17 +172,18 @@ class TestEnv(object):
             commands = input_commands
         os.chdir(self.current_dir)
         backing_file_name, backing_file_fmt = self._create_backing_file()
-        img_size = image_generator.create_image('test_image',
+        img_size = image_generator.create_image('test.img',
                                                 backing_file_name,
                                                 backing_file_fmt,
                                                 fuzz_config)
         for item in commands:
+            shutil.copy('test.img', 'copy.img')
             start = random.randint(0, img_size)
             end = random.randint(start, img_size)
             current_cmd = list(self.__dict__[item[0].replace('-', '_')])
             # Replace all placeholders with their real values
             for v in item[1:]:
-                c = v.replace('$test_img', 'test_image').\
+                c = v.replace('$test_img', 'copy.img').\
                     replace('$off', str(start)).\
                     replace('$len', str(end - start))
                 current_cmd.append(c)
@@ -208,6 +211,7 @@ class TestEnv(object):
                     multilog(test_summary + "PASS: Application exited with" + \
                              " the code '%d'\n\n" % retcode, sys.stdout,
                              self.log, self.parent_log)
+            os.remove('copy.img')
 
     def finish(self):
         """ Restore environment after a test execution. Remove folders of
@@ -217,7 +221,7 @@ class TestEnv(object):
         self.parent_log.close()
         os.chdir(self.init_path)
         if self.cleanup and not self.failed:
-            rmtree(self.current_dir)
+            shutil.rmtree(self.current_dir)
 
 if __name__ == '__main__':
 
