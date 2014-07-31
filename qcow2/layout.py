@@ -328,9 +328,7 @@ class Image(object):
                 accum.append(['>Q', entry_offset, entry_val, 'l2_entry'])
             return accum
 
-        if len(self.data_clusters) == 0:
-            self.l2_tables = FieldsList()
-        else:
+        if len(self.data_clusters) != 0:
             if meta_data is None:
                 v_meta_data = set([0])
             else:
@@ -415,10 +413,10 @@ class Image(object):
         self.backing_file_format = FieldsList()
         self.feature_name_table = FieldsList()
         self.end_of_extension_area = FieldsList()
-        self.data_clusters = self._alloc_data(self.image_size,
-                                              self.cluster_size)
         self.l2_tables = FieldsList()
         self.l1_table = FieldsList()
+        self.data_clusters = self._alloc_data(self.image_size,
+                                              self.cluster_size)
         # Container for entire image
         self.data = FieldsList()
         # Percentage of fields will be fuzzed
