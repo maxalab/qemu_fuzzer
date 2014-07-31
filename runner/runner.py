@@ -24,6 +24,7 @@ import random
 import shutil
 from itertools import count
 import getopt
+import StringIO
 try:
     import json
 except ImportError:
@@ -107,10 +108,8 @@ class TestEnv(object):
                           'discard $off $len'],
                          ['qemu-io', '$test_img', '-c',
                           'truncate $off']]
-        # VMDK format is skipped because such conversion requires
-        # a pregenerated vmdk file
         for fmt in ['raw', 'vdi', 'cow', 'qcow2', 'file',
-                    'qed', 'vpc']:
+                    'qed', 'vpc', 'vmdk']:
             self.commands.append(
                          ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
                           '$test_img', 'converted_image.' + fmt])
@@ -128,13 +127,19 @@ class TestEnv(object):
         self.cleanup = cleanup
         self.log_all = log_all
 
-    def _test_app(self, q_args):
+    @staticmethod
+    def _run_app(fd, q_args):
         """ Start application under test with specified arguments and return
         an exit code or a kill signal depending on the result of execution.
         """
         devnull = open('/dev/null', 'r+')
-        return subprocess.call(q_args, stdin=devnull, stdout=self.log,
-                               stderr=self.log)
+        process = subprocess.Popen(q_args, stdin=devnull,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        out, err = process.communicate()
+        fd.write(out)
+        fd.write(err)
+        return process.returncode
 
     def _create_backing_file(self):
         """Create a backing file in the current directory and return
@@ -148,15 +153,20 @@ class TestEnv(object):
                                           'file', 'qed', 'vpc'])
         backing_file_name = 'backing_img.' + backing_file_fmt
         # Size of the backing file varies from 1 to 10 MB
-        backing_file_size = random.randint(1, 10)*(1 << 20)
+        backing_file_size = random.randint(1, 10) * (1 << 20)
         cmd = self.qemu_img + ['create', '-f', backing_file_fmt,
                                backing_file_name, str(backing_file_size)]
-        devnull = open('/dev/null', 'r+')
-        retcode = subprocess.call(cmd, stdin=devnull, stdout=self.log,
-                                  stderr=self.log)
+        temp_log = StringIO.StringIO()
+        retcode = self._run_app(temp_log, cmd)
         if retcode == 0:
+            temp_log.close()
             return [backing_file_name, backing_file_fmt]
         else:
+            multilog("WARN: The %s backing file was not created.\n\n"
+                     % backing_file_fmt, sys.stderr, self.log, self.parent_log)
+            self.log.write("Log for the failure:\n" + temp_log.getvalue() +
+                           '\n\n')
+            temp_log.close()
             return [None, None]
 
     def execute(self, input_commands=None, fuzz_config=None):
@@ -178,8 +188,10 @@ class TestEnv(object):
                                                 fuzz_config)
         for item in commands:
             shutil.copy('test.img', 'copy.img')
-            start = random.randint(0, img_size)
-            end = random.randint(start, img_size)
+            # 'off' and 'len' are multiple of the sector size
+            sector_size = 512
+            start = random.randrange(0, img_size + 1, sector_size)
+            end = random.randrange(start, img_size + 1, sector_size)
             current_cmd = list(self.__dict__[item[0].replace('-', '_')])
             # Replace all placeholders with their real values
             for v in item[1:]:
@@ -192,8 +204,9 @@ class TestEnv(object):
                            "Backing file: %s\n" \
                            % (self.seed, " ".join(current_cmd),
                               self.current_dir, backing_file_name)
+            temp_log = StringIO.StringIO()
             try:
-                retcode = self._test_app(current_cmd)
+                retcode = self._run_app(temp_log, current_cmd)
             except OSError, e:
                 multilog(test_summary + "Error: Start of '%s' failed. " \
                          "Reason: %s\n\n" % (os.path.basename(
@@ -202,15 +215,18 @@ class TestEnv(object):
                 raise TestException
 
             if retcode < 0:
+                self.log.write(temp_log.getvalue())
                 multilog(test_summary + "FAIL: Test terminated by signal " +
                          "%s\n\n" % str_signal(-retcode), sys.stderr, self.log,
                          self.parent_log)
                 self.failed = True
             else:
                 if self.log_all:
+                    self.log.write(temp_log.getvalue())
                     multilog(test_summary + "PASS: Application exited with" + \
                              " the code '%d'\n\n" % retcode, sys.stdout,
                              self.log, self.parent_log)
+            temp_log.close()
             os.remove('copy.img')
 
     def finish(self):
@@ -342,7 +358,7 @@ if __name__ == '__main__':
     run_log = os.path.join(work_dir, 'run.log')
 
     # Add the path to the image generator module to sys.path
-    sys.path.append(os.path.dirname(os.path.realpath(args[1])))
+    sys.path.append(os.path.realpath(os.path.dirname(args[1])))
     # Remove a script extension from image generator module if any
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
     try:
