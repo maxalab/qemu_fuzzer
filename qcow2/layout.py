@@ -128,7 +128,7 @@ class Image(object):
         """
         def get_cluster_id(lst, length):
             """Return the first index of the sequence of the specified length
-            or None if the sequence cannot be inserted in the list
+            or None if the sequence cannot be inserted in the list.
             """
             if len(lst) != 0:
                 pairs = []
@@ -200,8 +200,8 @@ class Image(object):
             self.header['header_length'][0].fmt) + \
             self.header['header_length'][0].offset
         end_of_extension_area_len = 2 * UINT32_S
-        free_space = self.cluster_size - (max_header_len +
-                                            end_of_extension_area_len)
+        free_space = self.cluster_size - max_header_len - \
+                     end_of_extension_area_len
         # If the backing file name specified and there is enough space for it
         # in the first cluster, then it's placed in the very end of the first
         # cluster.
@@ -350,7 +350,7 @@ class Image(object):
             # Number of L2 tables having entries for all guest image clusters
             max_l2_size = ceil(UINT64_S * self.image_size /
                                float(self.cluster_size**2))
-            low_lim = int(ceil(len(temp)/max_l2_size))
+            low_lim = int(ceil(len(temp) / max_l2_size))
             # Binding of data clusters to L2 tables
             # Each table contains from low_lim to l2_size active entries
             while len(temp) > 0:
