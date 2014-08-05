@@ -18,7 +18,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import sys, os, signal
+import sys
+import os
+import signal
 import subprocess
 import random
 import shutil
@@ -33,8 +35,9 @@ except ImportError:
     try:
         import simplejson as json
     except ImportError:
-        print  >>sys.stderr, "WARN: Module for JSON processing is not "
-        "found.\n'--config' and '--command' options are not supported."
+        print >>sys.stderr, \
+            "Warning: Module for JSON processing is not found.\n" \
+            "'--config' and '--command' options are not supported."
 
 # Backing file sizes in MB
 MAX_BACKING_FILE_SIZE = 10
@@ -56,6 +59,7 @@ def str_signal(sig):
         if v == sig:
             return k
 
+
 def run_app(fd, q_args):
     """Start an application with specified arguments and return its exit code
     or kill signal depending on the result of execution.
@@ -68,6 +72,7 @@ def run_app(fd, q_args):
     fd.write(out)
     fd.write(err)
     return process.returncode
+
 
 class TestException(Exception):
     """Exception for errors risen by TestEnv objects."""
@@ -109,7 +114,7 @@ class TestEnv(object):
         self.current_dir = os.path.join(work_dir, 'test-' + test_id)
         self.qemu_img = os.environ.get('QEMU_IMG', 'qemu-img')\
                                   .strip().split(' ')
-        self.qemu_io =  os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
+        self.qemu_io = os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
         self.commands = [['qemu-img', 'check', '-f', 'qcow2', '$test_img'],
                          ['qemu-img', 'info', '-f', 'qcow2', '$test_img'],
                          ['qemu-io', '$test_img', '-c', 'read $off $len'],
@@ -126,8 +131,8 @@ class TestEnv(object):
         for fmt in ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file',
                     'qed', 'vpc']:
             self.commands.append(
-                         ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
-                          '$test_img', 'converted_image.' + fmt])
+                ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
+                 '$test_img', 'converted_image.' + fmt])
 
         try:
             os.makedirs(self.current_dir)
@@ -164,7 +169,7 @@ class TestEnv(object):
             temp_log.close()
             return (backing_file_name, backing_file_fmt)
         else:
-            multilog("WARN: The %s backing file was not created.\n\n"
+            multilog("Warning: The %s backing file was not created.\n\n"
                      % backing_file_fmt, sys.stderr, self.log, self.parent_log)
             self.log.write("Log for the failure:\n" + temp_log.getvalue() +
                            '\n\n')
@@ -201,8 +206,8 @@ class TestEnv(object):
             elif item[0] == 'qemu-io':
                 current_cmd = list(self.qemu_io)
             else:
-                multilog("WARN: test command '%s' is not defined.\n" % item[0],
-                         sys.stderr, self.log, self.parent_log)
+                multilog("Warning: test command '%s' is not defined.\n" \
+                         % item[0], sys.stderr, self.log, self.parent_log)
                 continue
             # Replace all placeholders with their real values
             for v in item[1:]:
@@ -237,7 +242,7 @@ class TestEnv(object):
             else:
                 if self.log_all:
                     self.log.write(temp_log.getvalue())
-                    multilog(test_summary + "PASS: Application exited with" + \
+                    multilog(test_summary + "PASS: Application exited with" +
                              " the code '%d'\n\n" % retcode, sys.stdout,
                              self.log, self.parent_log)
             temp_log.close()
@@ -325,8 +330,8 @@ if __name__ == '__main__':
                                        ['command=', 'help', 'seed=', 'config=',
                                         'keep_passed', 'verbose'])
     except getopt.error, e:
-        print >>sys.stderr, "Error: %s\n\nTry 'runner.py --help' for more "
-        "information" % e
+        print >>sys.stderr, \
+            "Error: %s\n\nTry 'runner.py --help' for more information" % e
         sys.exit(1)
 
     command = None
@@ -342,8 +347,9 @@ if __name__ == '__main__':
             try:
                 command = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print >>sys.stderr, "Error: JSON array of test commands cannot"
-                " be loaded\nReason: %s" % e
+                print >>sys.stderr, \
+                    "Error: JSON array of test commands cannot be loaded.\n" \
+                    "Reason: %s" % e
                 sys.exit(1)
         elif opt in ('-k', '--keep_passed'):
             cleanup = False
@@ -355,13 +361,15 @@ if __name__ == '__main__':
             try:
                 config = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print >>sys.stderr, "Error: JSON array with the fuzzer "
-                "configuration cannot be loaded\nReason: %s" % e
+                print >>sys.stderr, \
+                    "Error: JSON array with the fuzzer configuration cannot" \
+                    " be loaded\nReason: %s" % e
                 sys.exit(1)
 
     if not len(args) == 2:
-        print >>sys.stderr, "Expected two parameters\nTry 'runner.py --help'" \
-            " for more information"
+        print >>sys.stderr, \
+            "Expected two parameters\nTry 'runner.py --help'" \
+            " for more information."
         sys.exit(1)
 
     work_dir = os.path.realpath(args[0])
@@ -377,8 +385,9 @@ if __name__ == '__main__':
     try:
         image_generator = __import__(generator_name)
     except ImportError, e:
-        print >>sys.stderr, "Error: The image generator '%s' cannot be "
-        "imported.\nReason: %s" % (generator_name, e)
+        print >>sys.stderr, \
+            "Error: The image generator '%s' cannot be imported.\n" \
+            "Reason: %s" % (generator_name, e)
         sys.exit(1)
 
     # Enable core dumps
