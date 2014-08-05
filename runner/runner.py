@@ -24,22 +24,25 @@ import random
 import shutil
 from itertools import count
 import getopt
+import StringIO
+import resource
+
 try:
     import json
 except ImportError:
     try:
         import simplejson as json
     except ImportError:
-        print "Warning: Module for JSON processing is not found.\n" + \
-            "'--config' and '--command' options are not supported."
-import resource
-resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
+        print  >>sys.stderr, "WARN: Module for JSON processing is not "
+        "found.\n'--config' and '--command' options are not supported."
+
+# Backing file sizes in MB
+MAX_BACKING_FILE_SIZE = 10
+MIN_BACKING_FILE_SIZE = 1
 
 
 def multilog(msg, *output):
-    """ Write an object to all of specified file descriptors
-    """
-
+    """ Write an object to all of specified file descriptors."""
     for fd in output:
         fd.write(msg)
         fd.flush()
@@ -47,30 +50,45 @@ def multilog(msg, *output):
 
 def str_signal(sig):
     """ Convert a numeric value of a system signal to the string one
-    defined by the current operational system
+    defined by the current operational system.
     """
-
     for k, v in signal.__dict__.items():
         if v == sig:
             return k
 
+def run_app(fd, q_args):
+    """Start an application with specified arguments and return its exit code
+    or kill signal depending on the result of execution.
+    """
+    devnull = open('/dev/null', 'r+')
+    process = subprocess.Popen(q_args, stdin=devnull,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    out, err = process.communicate()
+    fd.write(out)
+    fd.write(err)
+    return process.returncode
 
 class TestException(Exception):
-    """Exception for errors risen by TestEnv objects"""
+    """Exception for errors risen by TestEnv objects."""
     pass
 
 
 class TestEnv(object):
-    """ Trivial test object
+
+    """Test object.
 
     The class sets up test environment, generates backing and test images
     and executes application under tests with specified arguments and a test
     image provided.
+
     All logs are collected.
-    Summary log will contain short descriptions and statuses of tests in
+
+    The summary log will contain short descriptions and statuses of tests in
     a run.
-    Test log will include application (e.g. 'qemu-img') logs besides info sent
-    to the summary log.
+
+    The test log will include application (e.g. 'qemu-img') logs besides info
+    sent to the summary log.
     """
 
     def __init__(self, test_id, seed, work_dir, run_log,
@@ -78,7 +96,7 @@ class TestEnv(object):
         """Set test environment in a specified work directory.
 
         Path to qemu-img and qemu-io will be retrieved from 'QEMU_IMG' and
-        'QEMU_IO' environment variables
+        'QEMU_IO' environment variables.
         """
         if seed is not None:
             self.seed = seed
@@ -89,11 +107,9 @@ class TestEnv(object):
         self.init_path = os.getcwd()
         self.work_dir = work_dir
         self.current_dir = os.path.join(work_dir, 'test-' + test_id)
-        self.qemu_img = \
-                        os.environ.get('QEMU_IMG', 'qemu-img')\
+        self.qemu_img = os.environ.get('QEMU_IMG', 'qemu-img')\
                                   .strip().split(' ')
-        self.qemu_io = \
-                       os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
+        self.qemu_io =  os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
         self.commands = [['qemu-img', 'check', '-f', 'qcow2', '$test_img'],
                          ['qemu-img', 'info', '-f', 'qcow2', '$test_img'],
                          ['qemu-io', '$test_img', '-c', 'read $off $len'],
@@ -128,36 +144,34 @@ class TestEnv(object):
         self.cleanup = cleanup
         self.log_all = log_all
 
-    def _test_app(self, q_args):
-        """ Start application under test with specified arguments and return
-        an exit code or a kill signal depending on the result of execution.
-        """
-        devnull = open('/dev/null', 'r+')
-        return subprocess.call(q_args, stdin=devnull, stdout=self.log,
-                               stderr=self.log)
-
     def _create_backing_file(self):
-        """Create a backing file in the current directory and return
-        its name and file format
+        """Create a backing file in the current directory.
+
+        Return a tuple of a backing file name and format.
 
         Format of a backing file is randomly chosen from all formats supported
-        by 'qemu-img create'
+        by 'qemu-img create'.
         """
-        # All formats qemu-img can create images of.
+        # All formats supported by the 'qemu-img create' command.
         backing_file_fmt = random.choice(['raw', 'vmdk', 'vdi', 'cow', 'qcow2',
                                           'file', 'qed', 'vpc'])
         backing_file_name = 'backing_img.' + backing_file_fmt
-        # Size of the backing file varies from 1 to 10 MB
-        backing_file_size = random.randint(1, 10)*(1 << 20)
+        backing_file_size = random.randint(MIN_BACKING_FILE_SIZE,
+                                           MAX_BACKING_FILE_SIZE) * (1 << 20)
         cmd = self.qemu_img + ['create', '-f', backing_file_fmt,
                                backing_file_name, str(backing_file_size)]
-        devnull = open('/dev/null', 'r+')
-        retcode = subprocess.call(cmd, stdin=devnull, stdout=self.log,
-                                  stderr=self.log)
+        temp_log = StringIO.StringIO()
+        retcode = run_app(temp_log, cmd)
         if retcode == 0:
-            return [backing_file_name, backing_file_fmt]
+            temp_log.close()
+            return (backing_file_name, backing_file_fmt)
         else:
-            return [None, None]
+            multilog("WARN: The %s backing file was not created.\n\n"
+                     % backing_file_fmt, sys.stderr, self.log, self.parent_log)
+            self.log.write("Log for the failure:\n" + temp_log.getvalue() +
+                           '\n\n')
+            temp_log.close()
+            return (None, None)
 
     def execute(self, input_commands=None, fuzz_config=None):
         """ Execute a test.
@@ -170,6 +184,7 @@ class TestEnv(object):
             commands = self.commands
         else:
             commands = input_commands
+
         os.chdir(self.current_dir)
         backing_file_name, backing_file_fmt = self._create_backing_file()
         img_size = image_generator.create_image('test.img',
@@ -178,22 +193,36 @@ class TestEnv(object):
                                                 fuzz_config)
         for item in commands:
             shutil.copy('test.img', 'copy.img')
-            start = random.randint(0, img_size)
-            end = random.randint(start, img_size)
-            current_cmd = list(self.__dict__[item[0].replace('-', '_')])
+            # 'off' and 'len' are multiple of the sector size
+            sector_size = 512
+            start = random.randrange(0, img_size + 1, sector_size)
+            end = random.randrange(start, img_size + 1, sector_size)
+
+            if item[0] == 'qemu-img':
+                current_cmd = list(self.qemu_img)
+            elif item[0] == 'qemu-io':
+                current_cmd = list(self.qemu_io)
+            else:
+                multilog("WARN: test command '%s' is not defined.\n" % item[0],
+                         sys.stderr, self.log, self.parent_log)
+                continue
             # Replace all placeholders with their real values
             for v in item[1:]:
-                c = v.replace('$test_img', 'copy.img').\
-                    replace('$off', str(start)).\
-                    replace('$len', str(end - start))
+                c = (v
+                     .replace('$test_img', 'copy.img')
+                     .replace('$off', str(start))
+                     .replace('$len', str(end - start)))
                 current_cmd.append(c)
+
             # Log string with the test header
             test_summary = "Seed: %s\nCommand: %s\nTest directory: %s\n" \
                            "Backing file: %s\n" \
                            % (self.seed, " ".join(current_cmd),
                               self.current_dir, backing_file_name)
+
+            temp_log = StringIO.StringIO()
             try:
-                retcode = self._test_app(current_cmd)
+                retcode = run_app(temp_log, current_cmd)
             except OSError, e:
                 multilog(test_summary + "Error: Start of '%s' failed. " \
                          "Reason: %s\n\n" % (os.path.basename(
@@ -202,21 +231,22 @@ class TestEnv(object):
                 raise TestException
 
             if retcode < 0:
+                self.log.write(temp_log.getvalue())
                 multilog(test_summary + "FAIL: Test terminated by signal " +
                          "%s\n\n" % str_signal(-retcode), sys.stderr, self.log,
                          self.parent_log)
                 self.failed = True
             else:
                 if self.log_all:
+                    self.log.write(temp_log.getvalue())
                     multilog(test_summary + "PASS: Application exited with" + \
                              " the code '%d'\n\n" % retcode, sys.stdout,
                              self.log, self.parent_log)
+            temp_log.close()
             os.remove('copy.img')
 
     def finish(self):
-        """ Restore environment after a test execution. Remove folders of
-        passed tests
-        """
+        """Restore the test environment after a test execution."""
         self.log.close()
         self.parent_log.close()
         os.chdir(self.init_path)
@@ -275,7 +305,7 @@ if __name__ == '__main__':
 
     def run_test(test_id, seed, work_dir, run_log, cleanup, log_all,
                  command, fuzz_config):
-        """Setup environment for one test and execute this test"""
+        """Setup environment for one test and execute this test."""
         try:
             test = TestEnv(test_id, seed, work_dir, run_log, cleanup,
                            log_all)
@@ -287,7 +317,6 @@ if __name__ == '__main__':
         try:
             try:
                 test.execute(command, fuzz_config)
-            # Silent exit on user break
             except TestException:
                 sys.exit(1)
         finally:
@@ -298,7 +327,8 @@ if __name__ == '__main__':
                                        ['command=', 'help', 'seed=', 'config=',
                                         'keep_passed', 'verbose'])
     except getopt.error, e:
-        print "Error: %s\n\nTry 'runner.py --help' for more information" % e
+        print >>sys.stderr, "Error: %s\n\nTry 'runner.py --help' for more "
+        "information" % e
         sys.exit(1)
 
     command = None
@@ -314,8 +344,8 @@ if __name__ == '__main__':
             try:
                 command = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print "Error: JSON array of test commands cannot be loaded"\
-                    "\nReason: %s" % e
+                print >>sys.stderr, "Error: JSON array of test commands cannot"
+                " be loaded\nReason: %s" % e
                 sys.exit(1)
         elif opt in ('-k', '--keep_passed'):
             cleanup = False
@@ -327,13 +357,13 @@ if __name__ == '__main__':
             try:
                 config = json.loads(arg)
             except (TypeError, ValueError, NameError), e:
-                print "Error: JSON array with the fuzzer configuration " \
-                    "cannot be loaded\nReason: %s" % e
+                print >>sys.stderr, "Error: JSON array with the fuzzer "
+                "configuration cannot be loaded\nReason: %s" % e
                 sys.exit(1)
 
     if not len(args) == 2:
-        print "Expected two parameters\nTry 'runner.py --help' " \
-            "for more information"
+        print >>sys.stderr, "Expected two parameters\nTry 'runner.py --help'" \
+            " for more information"
         sys.exit(1)
 
     work_dir = os.path.realpath(args[0])
@@ -342,15 +372,19 @@ if __name__ == '__main__':
     run_log = os.path.join(work_dir, 'run.log')
 
     # Add the path to the image generator module to sys.path
-    sys.path.append(os.path.dirname(os.path.realpath(args[1])))
+    sys.path.append(os.path.realpath(os.path.dirname(args[1])))
     # Remove a script extension from image generator module if any
     generator_name = os.path.splitext(os.path.basename(args[1]))[0]
+
     try:
         image_generator = __import__(generator_name)
     except ImportError, e:
-        print "Error: The image generator '%s' cannot be imported.\n" \
-            "Reason: %s" % (generator_name, e)
+        print >>sys.stderr, "Error: The image generator '%s' cannot be "
+        "imported.\nReason: %s" % (generator_name, e)
         sys.exit(1)
+
+    # Enable core dumps
+    resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
     # If a seed is specified, only one test will be executed.
     # Otherwise runner will terminate after a keyboard interruption
     for test_id in count(1):
