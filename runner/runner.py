@@ -33,7 +33,7 @@ except ImportError:
     try:
         import simplejson as json
     except ImportError:
-        print  >>sys.stderr, "WARN: Module for JSON processing is not "
+        print >>sys.stderr, "WARN: Module for JSON processing is not "
         "found.\n'--config' and '--command' options are not supported."
 
 # Backing file sizes in MB
@@ -56,6 +56,7 @@ def str_signal(sig):
         if v == sig:
             return k
 
+
 def run_app(fd, q_args):
     """Start an application with specified arguments and return its exit code
     or kill signal depending on the result of execution.
@@ -68,6 +69,7 @@ def run_app(fd, q_args):
     fd.write(out)
     fd.write(err)
     return process.returncode
+
 
 class TestException(Exception):
     """Exception for errors risen by TestEnv objects."""
