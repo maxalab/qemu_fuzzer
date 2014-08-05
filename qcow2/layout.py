@@ -408,7 +408,7 @@ class Image(object):
         self.header['l1_size'][0].value = max_l2_size
         self.header['l1_table_offset'][0].value = l1_offset
 
-    def __init__(self, backing_file_name=None, backing_file_fmt=None):
+    def __init__(self, backing_file_name=None):
         """Create a random valid qcow2 image with the correct inner structure
         and allowable values.
         """
@@ -525,6 +525,7 @@ def create_image(test_img_path, backing_file_name=None, backing_file_fmt=None,
                  fields_to_fuzz=None):
     """Create a fuzzed image and write it to the specified file."""
     image = Image(backing_file_name)
+    image.set_backing_file_format(backing_file_fmt)
     image.create_feature_name_table()
     image.set_end_of_extension_area()
     image.create_l2_tables()
