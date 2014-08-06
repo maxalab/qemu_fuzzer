@@ -19,12 +19,15 @@
 import random
 
 
+UINT8 = 0xff
 UINT32 = 0xffffffff
 UINT64 = 0xffffffffffffffff
 # Most significant bit orders
 UINT32_M = 31
 UINT64_M = 63
 # Fuzz vectors
+UINT8_V = [0, 0x10, UINT8/4, UINT8/2 - 1, UINT8/2, UINT8/2 + 1, UINT8 - 1,
+           UINT8]
 UINT32_V = [0, 0x100, 0x1000, 0x10000, 0x100000, UINT32/4, UINT32/2 - 1,
             UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32]
 UINT64_V = UINT32_V + [0x1000000, 0x10000000, 0x100000000, UINT64/4,
@@ -305,17 +308,13 @@ def bf_format(current):
 
 def feature_type(current):
     """Fuzz feature type field of a feature name table header extension."""
-    constraints = [
-        [(0, 255)]
-    ]
+    constraints = UINT8_V
     return selector(current, constraints)
 
 
 def feature_bit_number(current):
     """Fuzz bit number field of a feature name table header extension."""
-    constraints = [
-        [(0, 255)]
-    ]
+    constraints = UINT8_V
     return selector(current, constraints)
 
 
