@@ -197,8 +197,8 @@ Fuzzer requirements:
     of all possible test commands can be available in the test runner
     internally.
 14. Should support an external cancellation of a test run
-15. Seed and action vector should be logged (for regression purpose)
-16. All files related to test result should be collected: a test image,
+15. Seed should be logged (for regression purpose)
+16. All files related to a test result should be collected: a test image,
     SUT logs, fuzzer logs and crash dumps
 17. Should be compatible with python version 2.4-2.7
 18. Usage of external libraries should be limited as much as possible.
@@ -214,10 +214,10 @@ provide an ability to add any other image format.
 Effectiveness:
 -------------
 
-Fuzzer can be controlled via template, seed and action vector;
+The fuzzer can be controlled via template, seed and action vector;
 it makes the fuzzer itself invariant to an image format and test logic.
 It should be able to perform rather complex and precise tests, that can be
-specified via action vector. Otherwise, knowledge about an image structure
+specified via an action vector. Otherwise, knowledge about an image structure
 allows the fuzzer to generate the pool of all available areas can be fuzzed
 and randomly select some of them and so compose its own action vector.
 Also complexity of a template defines complexity of the fuzzer, so its
