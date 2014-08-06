@@ -412,7 +412,6 @@ class Image(object):
         """Create a random valid qcow2 image with the correct inner structure
         and allowable values.
         """
-        # Image size is saved as an attribute for the runner needs
         cluster_bits, self.image_size = self._size_params()
         self.cluster_size = 1 << cluster_bits
         self.header = FieldsList()
@@ -427,16 +426,6 @@ class Image(object):
         self.set_backing_file_name(backing_file_name)
         self.data_clusters = self._alloc_data(self.image_size,
                                               self.cluster_size)
-        # self.ext_offset = struct.calcsize(
-        #     self.header['header_length'][0].fmt) + \
-        #     self.header['header_length'][0].offset
-        # self.create_header(cluster_bits, backing_file_name)
-        # self.set_backing_file_name(backing_file_name)
-        # offset = self.set_backing_file_format(backing_file_fmt)
-        # offset = self.create_feature_name_table(offset)
-        # self.set_end_of_extension_area(offset)
-        # self.create_l2_tables()
-        # self.create_l1_table()
         # Container for entire image
         self.data = FieldsList()
         # Percentage of fields will be fuzzed
