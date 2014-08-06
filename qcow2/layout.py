@@ -20,6 +20,7 @@ import random
 import struct
 import fuzz
 from math import ceil
+from os import urandom
 
 MAX_IMAGE_SIZE = 10 * (1 << 20)
 # Standard sizes
@@ -413,9 +414,7 @@ class Image(object):
         """Create a random valid qcow2 image with the correct inner structure
         and allowable values.
         """
-        # Image size is saved as an attribute for the runner needs
         cluster_bits, self.image_size = self._size_params()
-        # Saved as an attribute, because it's necessary for writing
         self.cluster_size = 1 << cluster_bits
         self.create_header(cluster_bits, backing_file_name)
         self.set_backing_file_name(backing_file_name)
@@ -495,8 +494,13 @@ class Image(object):
         for field in self.data:
             image_file.seek(field.offset)
             image_file.write(struct.pack(field.fmt, field.value))
-        image_file.seek(0, 2)
+
+        for cluster in sorted(self.data_clusters):
+            image_file.seek(cluster * self.cluster_size)
+            image_file.write(urandom(self.cluster_size))
+
         # Align the real image size to the cluster size
+        image_file.seek(0, 2)
         size = image_file.tell()
         rounded = (size + self.cluster_size - 1) & ~(self.cluster_size - 1)
         if rounded > size:
