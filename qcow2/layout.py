@@ -493,7 +493,6 @@ class Image(object):
         image_file = open(filename, 'w')
         self._join()
         for field in self.data:
-            print field
             image_file.seek(field.offset)
             image_file.write(struct.pack(field.fmt, field.value))
         image_file.seek(0, 2)
