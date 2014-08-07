@@ -128,9 +128,7 @@ class TestEnv(object):
                           'discard $off $len'],
                          ['qemu-io', '$test_img', '-c',
                           'truncate $off']]
-        # VMDK format is skipped because such conversion requires
-        # a pregenerated vmdk file
-        for fmt in ['raw', 'vdi', 'cow', 'qcow2', 'file',
+        for fmt in ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file',
                     'qed', 'vpc']:
             self.commands.append(
                 ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
