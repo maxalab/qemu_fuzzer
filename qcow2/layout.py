@@ -93,83 +93,37 @@ class Image(object):
     a file.
     """
 
-    @staticmethod
-    def _size_params():
-        """Generate a random image size aligned to a random correct
-        cluster size.
+    def __init__(self, backing_file_name=None):
+        """Create a random valid qcow2 image with the correct inner structure
+        and allowable values.
         """
-        cluster_bits = random.randrange(9, 21)
-        cluster_size = 1 << cluster_bits
-        img_size = random.randrange(0, MAX_IMAGE_SIZE + 1, cluster_size)
-        return (cluster_bits, img_size)
+        cluster_bits, self.image_size = self._size_params()
+        self.cluster_size = 1 << cluster_bits
+        self.header = FieldsList()
+        self.backing_file_name = FieldsList()
+        self.backing_file_format = FieldsList()
+        self.feature_name_table = FieldsList()
+        self.end_of_extension_area = FieldsList()
+        self.l2_tables = FieldsList()
+        self.l1_table = FieldsList()
+        self.ext_offset = 0
+        self.create_header(cluster_bits, backing_file_name)
+        self.set_backing_file_name(backing_file_name)
+        self.data_clusters = self._alloc_data(self.image_size,
+                                              self.cluster_size)
+        # Container for entire image
+        self.data = FieldsList()
+        # Percentage of fields will be fuzzed
+        self.bias = random.uniform(0.2, 0.5)
 
-    @staticmethod
-    def _get_available_clusters(used, number):
-        """Return a set of indices of not allocated clusters.
-
-        'used' contains indices of currently allocated clusters.
-        All clusters that cannot be allocated between 'used' clusters will have
-        indices appended to the end of 'used'.
-        """
-        append_id = max(used) + 1
-        free = set(range(1, append_id)) - used
-        if len(free) >= number:
-            return set(random.sample(free, number))
-        else:
-            return free | set(range(append_id, append_id + number - len(free)))
-
-    @staticmethod
-    def _get_adjacent_clusters(used, size):
-        """Return an index of the first cluster in the sequence of free ones.
-
-        'used' contains indices of currently allocated clusters. 'size' is the
-        length of the sequence of free clusters.
-        If the sequence of 'size' is not available between 'used' clusters, its
-        first index will be append to the end of 'used'.
-        """
-        def get_cluster_id(lst, length):
-            """Return the first index of the sequence of the specified length
-            or None if the sequence cannot be inserted in the list.
-            """
-            if len(lst) != 0:
-                pairs = []
-                pair = (lst[0], 1)
-                for i in range(1, len(lst)):
-                    if lst[i] == lst[i-1] + 1:
-                        pair = (lst[i], pair[1] + 1)
-                    else:
-                        pairs.append(pair)
-                        pair = (lst[i], 1)
-                pairs.append(pair)
-                random.shuffle(pairs)
-                for x, s in pairs:
-                    if s >= length:
-                        return x - length + 1
-            return None
-
-        append_id = max(used) + 1
-        free = list(set(range(1, append_id)) - used)
-        idx = get_cluster_id(free, size)
-        if idx is None:
-            return append_id
-        else:
-            return idx
-
-    @staticmethod
-    def _get_cluster_ids(fields_list, cluster_size):
-        """Return indices of clusters allocated by fields of fields_list."""
-        ids = set()
-        for x in fields_list:
-            ids.add(x.offset/cluster_size)
-        return ids
-
-    @staticmethod
-    def _alloc_data(img_size, cluster_size):
-        """Return a set of random indices of clusters allocated for guest data.
-        """
-        num_of_cls = img_size/cluster_size
-        return set(random.sample(range(1, num_of_cls + 1),
-                                 random.randint(0, num_of_cls)))
+    def __iter__(self):
+        return iter([self.header,
+                     self.backing_file_format,
+                     self.feature_name_table,
+                     self.end_of_extension_area,
+                     self.backing_file_name,
+                     self.l1_table,
+                     self.l2_tables])
 
     def create_header(self, cluster_bits, backing_file_name=None):
         """Generate a random valid header."""
@@ -351,11 +305,13 @@ class Image(object):
             l1 = [['>Q', l1_offset, 0, 'l1_entry']]
             l2 = []
         else:
-            meta_data = set([0])
+            meta_data = self._get_metadata()
             guest_clusters = random.sample(range(self.image_size /
                                                  self.cluster_size),
                                            len(self.data_clusters))
+            # Number of entries in a L1/L2 table
             l_size = self.cluster_size / UINT64_S
+            # Number of clusters necessary for L1 table
             l1_size = int(ceil((max(guest_clusters) + 1) / float(l_size**2)))
             l1_start = self._get_adjacent_clusters(self.data_clusters |
                                                    meta_data, l1_size)
@@ -381,46 +337,6 @@ class Image(object):
         self.header['l1_size'][0].value = int(ceil(UINT64_S * self.image_size /
                                                 float(self.cluster_size**2)))
         self.header['l1_table_offset'][0].value = l1_offset
-
-    def __init__(self, backing_file_name=None):
-        """Create a random valid qcow2 image with the correct inner structure
-        and allowable values.
-        """
-        cluster_bits, self.image_size = self._size_params()
-        self.cluster_size = 1 << cluster_bits
-        self.header = FieldsList()
-        self.backing_file_name = FieldsList()
-        self.backing_file_format = FieldsList()
-        self.feature_name_table = FieldsList()
-        self.end_of_extension_area = FieldsList()
-        self.l2_tables = FieldsList()
-        self.l1_table = FieldsList()
-        self.ext_offset = 0
-        self.create_header(cluster_bits, backing_file_name)
-        self.set_backing_file_name(backing_file_name)
-        self.data_clusters = self._alloc_data(self.image_size,
-                                              self.cluster_size)
-        # Container for entire image
-        self.data = FieldsList()
-        # Percentage of fields will be fuzzed
-        self.bias = random.uniform(0.2, 0.5)
-
-    def __iter__(self):
-        return iter([self.header,
-                     self.backing_file_format,
-                     self.feature_name_table,
-                     self.end_of_extension_area,
-                     self.backing_file_name,
-                     self.l1_table,
-                     self.l2_tables])
-
-    def _join(self):
-        """Join all image structure elements as header, tables, etc in one
-        list of fields.
-        """
-        if len(self.data) == 0:
-            for v in self:
-                self.data += v
 
     def fuzz(self, fields_to_fuzz=None):
         """Fuzz an image by corrupting values of a random subset of its fields.
@@ -482,6 +398,92 @@ class Image(object):
             image_file.seek(rounded - 1)
             image_file.write("\0")
         image_file.close()
+
+    @staticmethod
+    def _size_params():
+        """Generate a random image size aligned to a random correct
+        cluster size.
+        """
+        cluster_bits = random.randrange(9, 21)
+        cluster_size = 1 << cluster_bits
+        img_size = random.randrange(0, MAX_IMAGE_SIZE + 1, cluster_size)
+        return (cluster_bits, img_size)
+
+    @staticmethod
+    def _get_available_clusters(used, number):
+        """Return a set of indices of not allocated clusters.
+
+        'used' contains indices of currently allocated clusters.
+        All clusters that cannot be allocated between 'used' clusters will have
+        indices appended to the end of 'used'.
+        """
+        append_id = max(used) + 1
+        free = set(range(1, append_id)) - used
+        if len(free) >= number:
+            return set(random.sample(free, number))
+        else:
+            return free | set(range(append_id, append_id + number - len(free)))
+
+    @staticmethod
+    def _get_adjacent_clusters(used, size):
+        """Return an index of the first cluster in the sequence of free ones.
+
+        'used' contains indices of currently allocated clusters. 'size' is the
+        length of the sequence of free clusters.
+        If the sequence of 'size' is not available between 'used' clusters, its
+        first index will be append to the end of 'used'.
+        """
+        def get_cluster_id(lst, length):
+            """Return the first index of the sequence of the specified length
+            or None if the sequence cannot be inserted in the list.
+            """
+            if len(lst) != 0:
+                pairs = []
+                pair = (lst[0], 1)
+                for i in range(1, len(lst)):
+                    if lst[i] == lst[i-1] + 1:
+                        pair = (lst[i], pair[1] + 1)
+                    else:
+                        pairs.append(pair)
+                        pair = (lst[i], 1)
+                pairs.append(pair)
+                random.shuffle(pairs)
+                for x, s in pairs:
+                    if s >= length:
+                        return x - length + 1
+            return None
+
+        append_id = max(used) + 1
+        free = list(set(range(1, append_id)) - used)
+        idx = get_cluster_id(free, size)
+        if idx is None:
+            return append_id
+        else:
+            return idx
+
+    @staticmethod
+    def _alloc_data(img_size, cluster_size):
+        """Return a set of random indices of clusters allocated for guest data.
+        """
+        num_of_cls = img_size/cluster_size
+        return set(random.sample(range(1, num_of_cls + 1),
+                                 random.randint(0, num_of_cls)))
+
+    def _get_metadata(self):
+        """Return indices of clusters allocated for image metadata."""
+        ids = set()
+        self._join()
+        for x in self.data:
+            ids.add(x.offset/self.cluster_size)
+        return ids
+
+    def _join(self):
+        """Join all image structure elements as header, tables, etc in one
+        list of fields.
+        """
+        if len(self.data) == 0:
+            for v in self:
+                self.data += v
 
 
 def create_image(test_img_path, backing_file_name=None, backing_file_fmt=None,
