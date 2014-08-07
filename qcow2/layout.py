@@ -350,20 +350,32 @@ class Image(object):
             # Number of L2 tables having entries for all guest image clusters
             max_l2_size = ceil(UINT64_S * self.image_size /
                                float(self.cluster_size**2))
-            low_lim = int(ceil(len(temp) / max_l2_size))
+            # Number of entries in the last L2 table (the only table having
+            # not aligned data)
+            last_l2_size = ((self.image_size / self.cluster_size) % l2_size) \
+                           or l2_size
             # Binding of data clusters to L2 tables
             # Each table contains from low_lim to l2_size active entries
             while len(temp) > 0:
-                num_of_entries = random.randint(low_lim, l2_size)
-                if num_of_entries > len(temp):
-                    num_of_entries = len(temp)
-                entries, temp = temp[:num_of_entries], temp[num_of_entries:]
-                entry_ids = random.sample(range(l2_size), num_of_entries)
-                l2_content.append(zip(entry_ids, entries))
+                if len(l2_content) + 1 == max_l2_size:
+                    entry_ids = random.sample(range(last_l2_size), len(temp))
+                    l2_content.append(zip(entry_ids, temp))
+                    temp = []
+                else:
+                    low_limit = max(1, int(ceil((len(temp) - last_l2_size) /
+                                                (max_l2_size - 1 -
+                                                 len(l2_content)))))
+                    num_of_entries = random.randint(low_limit, l2_size)
+                    if num_of_entries > len(temp):
+                        num_of_entries = len(temp)
+                    entries, temp = temp[:num_of_entries], \
+                                    temp[num_of_entries:]
+                    entry_ids = random.sample(range(l2_size), num_of_entries)
+                    l2_content.append(zip(entry_ids, entries))
 
-                l2_clusters = self._get_available_clusters(self.data_clusters |
-                                                           v_meta_data,
-                                                           len(l2_content))
+            l2_clusters = self._get_available_clusters(self.data_clusters |
+                                                       v_meta_data,
+                                                       len(l2_content))
             l2 = reduce(create_entry, zip(l2_clusters, l2_content), [])
             self.l2_tables = FieldsList(l2)
 
