@@ -48,7 +48,7 @@ class Field(object):
         self.name = name
 
     def __iter__(self):
-        return iter([self.fmt, self.offset, self.value])
+        return iter([self.fmt, self.offset, self.value, self.name])
 
     def __repr__(self):
         return "Field(fmt='%s', offset=%d, value=%s, name=%s)" % \
@@ -67,7 +67,7 @@ class FieldsList(object):
         if meta_data is None:
             self.data = []
         else:
-            self.data = [Field(f[0], f[1], f[2], f[3])
+            self.data = [Field(*f)
                          for f in meta_data]
 
     def __getitem__(self, name):
@@ -76,9 +76,8 @@ class FieldsList(object):
     def __iter__(self):
         return iter(self.data)
 
-    def __iadd__(self, other):
-        self.data += other.data
-        return self
+    def __add__(self, other):
+        return FieldsList(self.data + other.data)
 
     def __len__(self):
         return len(self.data)
@@ -111,19 +110,17 @@ class Image(object):
         self.set_backing_file_name(backing_file_name)
         self.data_clusters = self._alloc_data(self.image_size,
                                               self.cluster_size)
-        # Container for entire image
-        self.data = FieldsList()
         # Percentage of fields will be fuzzed
         self.bias = random.uniform(0.2, 0.5)
 
     def __iter__(self):
-        return iter([self.header,
-                     self.backing_file_format,
-                     self.feature_name_table,
-                     self.end_of_extension_area,
-                     self.backing_file_name,
-                     self.l1_table,
-                     self.l2_tables])
+        return iter(self.header +
+                    self.backing_file_format +
+                    self.feature_name_table +
+                    self.end_of_extension_area +
+                    self.backing_file_name +
+                    self.l1_table +
+                    self.l2_tables)
 
     def create_header(self, cluster_bits, backing_file_name=None):
         """Generate a random valid header."""
@@ -188,9 +185,7 @@ class Image(object):
             ])
 
     def set_backing_file_format(self, backing_file_fmt=None):
-        """Generate the header extension for the backing file
-        format.
-        """
+        """Generate the header extension for the backing file format."""
         if backing_file_fmt is not None:
             # Calculation of the free space available in the first cluster
             end_of_extension_area_len = 2 * UINT32_S
@@ -342,9 +337,11 @@ class Image(object):
         """Fuzz an image by corrupting values of a random subset of its fields.
 
         Without parameters the method fuzzes an entire image.
+
         If 'fields_to_fuzz' is specified then only fields in this list will be
         fuzzed. 'fields_to_fuzz' can contain both individual fields and more
         general image elements as a header or tables.
+
         In the first case the field will be fuzzed always.
         In the second a random subset of fields will be selected and fuzzed.
         """
@@ -355,8 +352,7 @@ class Image(object):
             return random.random() < self.bias
 
         if fields_to_fuzz is None:
-            self._join()
-            for field in self.data:
+            for field in self:
                 if coin():
                     field.value = getattr(fuzz, field.name)(field.value)
         else:
@@ -381,8 +377,7 @@ class Image(object):
     def write(self, filename):
         """Write an entire image to the file."""
         image_file = open(filename, 'w')
-        self._join()
-        for field in self.data:
+        for field in self:
             image_file.seek(field.offset)
             image_file.write(struct.pack(field.fmt, field.value))
 
@@ -472,18 +467,9 @@ class Image(object):
     def _get_metadata(self):
         """Return indices of clusters allocated for image metadata."""
         ids = set()
-        self._join()
-        for x in self.data:
+        for x in self:
             ids.add(x.offset/self.cluster_size)
         return ids
-
-    def _join(self):
-        """Join all image structure elements as header, tables, etc in one
-        list of fields.
-        """
-        if len(self.data) == 0:
-            for v in self:
-                self.data += v
 
 
 def create_image(test_img_path, backing_file_name=None, backing_file_fmt=None,
