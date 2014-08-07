@@ -320,71 +320,28 @@ class Image(object):
             ['>I', self.ext_offset + UINT32_S, 0, 'ext_length']
         ])
 
-    def create_l2_tables(self, meta_data=None):
-        """Generate random valid L2 tables."""
-        def create_entry(accum, item):
+    def create_l_structures(self):
+        """Generate random valid L1 and L2 tables."""
+        def create_l2_entry(host, guest, l2_cluster):
             """Generate one L2 entry."""
-            offset = item[0] * self.cluster_size
-            for field in item[1]:
-                entry_offset = offset + field[0] * UINT64_S
-                cluster_descriptor = field[1] * self.cluster_size
-                if not self.header['version'][0].value == 2:
-                    cluster_descriptor += random.randint(0, 1)
-                # While snapshots are not supported, bit #63 = 1
-                # Compressed clusters are not supported => bit #62 = 0
-                entry_val = (1 << 63) + cluster_descriptor
-                accum.append(['>Q', entry_offset, entry_val, 'l2_entry'])
-            return accum
-        if len(self.data_clusters) == 0:
-            self.l2_tables = FieldsList()
-        else:
-            if meta_data is None:
-                v_meta_data = set([0])
-            else:
-                v_meta_data = set(meta_data)
-            temp = list(self.data_clusters)
-            random.shuffle(temp)
-            l2_content = []
-            # Number of entries in an L2 table
+            offset = l2_cluster * self.cluster_size
             l2_size = self.cluster_size / UINT64_S
-            # Number of L2 tables having entries for all guest image clusters
-            max_l2_size = ceil(UINT64_S * self.image_size /
-                               float(self.cluster_size**2))
-            # Number of entries in the last L2 table (the only table having
-            # not aligned data)
-            last_l2_size = ((self.image_size / self.cluster_size) % l2_size) \
-                           or l2_size
-            # Binding of data clusters to L2 tables
-            # Each table contains from low_lim to l2_size active entries
-            while len(temp) > 0:
-                if len(l2_content) + 1 == max_l2_size:
-                    entry_ids = random.sample(range(last_l2_size), len(temp))
-                    l2_content.append(zip(entry_ids, temp))
-                    temp = []
-                else:
-                    low_limit = max(1, int(ceil((len(temp) - last_l2_size) /
-                                                (max_l2_size - 1 -
-                                                 len(l2_content)))))
-                    num_of_entries = random.randint(low_limit, l2_size)
-                    if num_of_entries > len(temp):
-                        num_of_entries = len(temp)
-                    entries, temp = temp[:num_of_entries], \
-                                    temp[num_of_entries:]
-                    entry_ids = random.sample(range(l2_size), num_of_entries)
-                    l2_content.append(zip(entry_ids, entries))
+            entry_offset = offset + UINT64_S * (guest % l2_size)
+            cluster_descriptor = host * self.cluster_size
+            if not self.header['version'][0].value == 2:
+                cluster_descriptor += random.randint(0, 1)
+            # While snapshots are not supported, bit #63 = 1
+            # Compressed clusters are not supported => bit #62 = 0
+            entry_val = (1 << 63) + cluster_descriptor
+            return ['>Q', entry_offset, entry_val, 'l2_entry']
 
-            l2_clusters = self._get_available_clusters(self.data_clusters |
-                                                       v_meta_data,
-                                                       len(l2_content))
-            l2 = reduce(create_entry, zip(l2_clusters, l2_content), [])
-            self.l2_tables = FieldsList(l2)
-
-    def create_l1_table(self, meta_data=None):
-        """Generate a random valid L1 table."""
-        # Number of clusters used by L2 tables having entries for all
-        # guest image clusters
-        max_l2_size = int(ceil(UINT64_S * self.image_size /
-                               float(self.cluster_size**2)))
+        def create_l1_entry(l2_cluster, l1_offset, guest):
+            """Generate one L1 entry."""
+            l1_size = self.cluster_size / UINT64_S
+            entry_offset = l1_offset + UINT64_S * (guest / l1_size)
+            # While snapshots are not supported bit #63 = 1
+            entry_val = (1 << 63) + l2_cluster * self.cluster_size
+            return ['>Q', entry_offset, entry_val, 'l1_entry']
 
         if len(self.data_clusters) == 0:
             # All metadata for an empty guest image needs 4 clusters:
@@ -392,32 +349,37 @@ class Image(object):
             # Header takes cluster #0, other clusters ##1-3 can be used
             l1_offset = random.randint(1, 3) * self.cluster_size
             l1 = [['>Q', l1_offset, 0, 'l1_entry']]
+            l2 = []
         else:
-            if meta_data is None:
-                v_meta_data = set([0])
-            else:
-                v_meta_data = set(meta_data)
-            l2_cluster_ids = self._get_cluster_ids(self.l2_tables,
-                                                   self.cluster_size)
-            v_meta_data |= l2_cluster_ids
-            # Numbers of active L1 entries
-            l1_entries_ids = random.sample(range(max_l2_size),
-                                           len(l2_cluster_ids))
-            # Number of clusters allocated by L1 table
-            l1_size = int(ceil(UINT64_S * (max(l1_entries_ids) + 1) /
-                               float(self.cluster_size)))
-            l1_first_cluster_id = self._get_adjacent_clusters(
-                self.data_clusters | v_meta_data, l1_size)
-            l1_offset = l1_first_cluster_id * self.cluster_size
+            meta_data = set([0])
+            guest_clusters = random.sample(range(self.image_size /
+                                                 self.cluster_size),
+                                           len(self.data_clusters))
+            l_size = self.cluster_size / UINT64_S
+            l1_size = int(ceil((max(guest_clusters) + 1) / float(l_size**2)))
+            l1_start = self._get_adjacent_clusters(self.data_clusters |
+                                                   meta_data, l1_size)
+            meta_data |= set(range(l1_start, l1_start + l1_size))
+            l1_offset = l1_start * self.cluster_size
+            l2_ids = []
+            l2_clusters = []
             l1 = []
-            for f in zip(l1_entries_ids, l2_cluster_ids):
-                entry_offset = l1_offset + UINT64_S * f[0]
-                # While snapshots are not supported bit #63 = 1
-                entry_val = (1 << 63) + f[1] * self.cluster_size
-                l1.append(['>Q', entry_offset, entry_val, 'l1_entry'])
-
+            l2 = []
+            for host, guest in zip(self.data_clusters, guest_clusters):
+                l2_id = guest / l_size
+                if l2_id not in l2_ids:
+                    l2_ids.append(l2_id)
+                    l2_clusters.append(self._get_adjacent_clusters(
+                        self.data_clusters | meta_data | set(l2_clusters),
+                        1))
+                    l1.append(create_l1_entry(l2_clusters[-1], l1_offset,
+                                              guest))
+                l2.append(create_l2_entry(host, guest,
+                                          l2_clusters[l2_ids.index(l2_id)]))
+        self.l2_tables = FieldsList(l2)
         self.l1_table = FieldsList(l1)
-        self.header['l1_size'][0].value = max_l2_size
+        self.header['l1_size'][0].value = int(ceil(UINT64_S * self.image_size /
+                                                float(self.cluster_size**2)))
         self.header['l1_table_offset'][0].value = l1_offset
 
     def __init__(self, backing_file_name=None):
@@ -529,8 +491,7 @@ def create_image(test_img_path, backing_file_name=None, backing_file_fmt=None,
     image.set_backing_file_format(backing_file_fmt)
     image.create_feature_name_table()
     image.set_end_of_extension_area()
-    image.create_l2_tables()
-    image.create_l1_table()
+    image.create_l_structures()
     image.fuzz(fields_to_fuzz)
     image.write(test_img_path)
     return image.image_size
