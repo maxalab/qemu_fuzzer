@@ -155,7 +155,7 @@ class Image(object):
                                                         random.getrandbits(2)
             self.header['compatible_features'][0].value = random.getrandbits(1)
             self.header['header_length'][0].value = 104
-        # Extensions starts at the header last field offset and the field size
+        # Extensions start at the header last field offset and the field size
         self.ext_offset = struct.calcsize(
             self.header['header_length'][0].fmt) + \
             self.header['header_length'][0].offset
