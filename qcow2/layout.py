@@ -356,15 +356,21 @@ class Image(object):
             guest_clusters = random.sample(range(self.image_size /
                                                  self.cluster_size),
                                            len(self.data_clusters))
+            # Number of entries in a L1/L2 table
             l_size = self.cluster_size / UINT64_S
+            # Number of clusters necessary for L1 table
             l1_size = int(ceil((max(guest_clusters) + 1) / float(l_size**2)))
             l1_start = self._get_adjacent_clusters(self.data_clusters |
                                                    meta_data, l1_size)
             meta_data |= set(range(l1_start, l1_start + l1_size))
             l1_offset = l1_start * self.cluster_size
+            # Indices of L2 tables
             l2_ids = []
+            # Host clusters allocated for L2 tables
             l2_clusters = []
+            # L1 entries
             l1 = []
+            # L2 entries
             l2 = []
             for host, guest in zip(self.data_clusters, guest_clusters):
                 l2_id = guest / l_size
