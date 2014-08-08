@@ -454,9 +454,7 @@ class Image(object):
                                 field.value)
                         except AttributeError:
                             # Some fields can be skipped depending on
-                            # references, e.g. FNT header extension is not
-                            # generated for a feature mask header field
-                            # equal to zero
+                            # their prerequisites
                             pass
 
     def write(self, filename):
