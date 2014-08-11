@@ -33,7 +33,7 @@ Test runner
 
 The test runner generates test images, executes tests utilizing generated
 images, indicates their results and collects all test related artifacts (logs,
-core dumps, test images).
+core dumps, test images, backing files).
 The test means execution of all available commands under test with the same
 generated test image.
 By default, the test runner generates new tests and executes them until
@@ -58,12 +58,12 @@ qemu-img is required for creation of backing files, so it's mandatory to set
 the related environment variable if it's not installed in the system path.
 For details about environment variables see qemu-iotests/check.
 
-The runner accepts via the '--config' argument a JSON array of fields expected
-to be fuzzed, e.g.
+The runner accepts a JSON array of fields expected to be fuzzed via the
+'--config' argument, e.g.
 
        '[["feature_name_table"], ["header", "l1_table_offset"]]'
 
-Each sublist can be have one or two strings defining image structure elements.
+Each sublist can have one or two strings defining image structure elements.
 In the latter case a parent element should be placed on the first position,
 and a field name on the second one.
 
@@ -79,8 +79,8 @@ For variable arguments next aliases can be used:
     - $off for an offset in the fuzzed image
     - $len for a data size
 
-Values for last two aliases will be generated based on the size of the virtal
-disk in the fuzzed image.
+Values for last two aliases will be generated based on a size of a virtual
+disk of the generated image.
 In case when no commands are specified the runner will execute commands from
 the default list:
     - qemu-img check
@@ -99,8 +99,8 @@ Qcow2 image generator
 ---------------------
 
 The 'qcow2' generator is a Python package providing 'create_image' method as
-a single public API. See details in 'Test runner/image fuzzer' in 'Module
-interfaces'.
+a single public API. See details in 'Test runner/image fuzzer' chapter of
+'Module interfaces'.
 
 Qcow2 contains two submodules: fuzz.py and layout.py.
 
@@ -125,7 +125,8 @@ If a fuzzer configuration is specified, then it has the next interpretation:
     will be always fuzzed for every test. This case is useful for regression
     testing.
 
-For now only header fields, header extensions and L1/L2 tables are generated.
+Generator can create header fields, header extensions, L1/L2 tables and
+refcount blocks and table.
 
 Module interfaces
 -----------------

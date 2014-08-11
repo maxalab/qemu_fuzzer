@@ -21,6 +21,7 @@ import struct
 import fuzz
 from math import ceil
 from os import urandom
+from itertools import chain
 
 MAX_IMAGE_SIZE = 10 * (1 << 20)
 # Standard sizes
@@ -36,7 +37,7 @@ class Field(object):
     of value necessary for its packing to binary form, an offset from
     the beginning of the image, a value and a name.
 
-    The field can be iterated as a list [format, offset, value].
+    The field can be iterated as a list [format, offset, value, name].
     """
 
     __slots__ = ('fmt', 'offset', 'value', 'name')
@@ -59,8 +60,7 @@ class FieldsList(object):
 
     """List of fields.
 
-    The class allows access to a field in the list by its name and joins
-    several list in one via in-place addition.
+    The class allows access to a field in the list by its name.
     """
 
     def __init__(self, meta_data=None):
@@ -76,12 +76,6 @@ class FieldsList(object):
     def __iter__(self):
         return iter(self.data)
 
-    def __add__(self, other):
-        temp = FieldsList()
-        temp.data = self.data + other.data
-        # return FieldsList(self.data + other.data)
-        return temp
-
     def __len__(self):
         return len(self.data)
 
@@ -96,8 +90,8 @@ class Image(object):
     """
 
     def __init__(self, backing_file_name=None):
-        """Create a random valid qcow2 image with the correct inner structure
-        and allowable values.
+        """Create a random valid qcow2 image with the correct header and stored
+        backing file name.
         """
         cluster_bits, self.image_size = self._size_params()
         self.cluster_size = 1 << cluster_bits
@@ -119,15 +113,10 @@ class Image(object):
         self.bias = random.uniform(0.2, 0.5)
 
     def __iter__(self):
-        return iter(self.header +
-                    self.backing_file_format +
-                    self.feature_name_table +
-                    self.end_of_extension_area +
-                    self.backing_file_name +
-                    self.l1_table +
-                    self.l2_tables +
-                    self.refcount_table +
-                    self.refcount_blocks)
+        return chain(self.header, self.backing_file_format,
+                     self.feature_name_table, self.end_of_extension_area,
+                     self.backing_file_name, self.l1_table, self.l2_tables,
+                     self.refcount_table, self.refcount_blocks)
 
     def create_header(self, cluster_bits, backing_file_name=None):
         """Generate a random valid header."""
@@ -293,8 +282,8 @@ class Image(object):
 
         def create_l1_entry(l2_cluster, l1_offset, guest):
             """Generate one L1 entry."""
-            l1_size = self.cluster_size / UINT64_S
-            entry_offset = l1_offset + UINT64_S * (guest / l1_size)
+            l2_size = self.cluster_size / UINT64_S
+            entry_offset = l1_offset + UINT64_S * (guest / l2_size)
             # While snapshots are not supported bit #63 = 1
             entry_val = (1 << 63) + l2_cluster * self.cluster_size
             return ['>Q', entry_offset, entry_val, 'l1_entry']
@@ -359,12 +348,6 @@ class Image(object):
                 diff = set([x / size for x in new]) - block_ids
                 cluster_ids |= new
                 block_ids |= diff
-                assert len(cluster_ids) == len(block_ids), \
-                    'Different amount of rfc blocks'
-                assert max(block_ids) >= (max(data)/(self.cluster_size/2)), \
-                    'Not enough rfc blocks %d %d' % (max(block_ids), max(data))
-                assert len(cluster_ids - data) == len(cluster_ids), \
-                    'Double allocation rfc blocks'
             return cluster_ids, block_ids
 
         def allocate_rfc_table(data, init_blocks, block_size):
@@ -376,20 +359,15 @@ class Image(object):
             clusters = set()
             # Number of entries in one cluster of the refcount table
             size = self.cluster_size / UINT64_S
-            # Size of the refcount table based on the current number of
-            # refcount blocks
+            # Number of clusters necessary for the refcount table based on
+            # the current number of refcount blocks
             table_size = int(ceil((max(blocks) + 1) / float(size)))
-            assert table_size > 0, 'Too small rfc table size'
-            # Allocate (table_size + 1) clusters for potential l1 growth
+            # Index of the first cluster of the refcount table
             table_start = self._get_adjacent_clusters(data, table_size + 1)
             # Clusters allocated for the current length of the refcount table
             table_clusters = set(range(table_start, table_start + table_size))
-            assert len(table_clusters) == table_size, \
-                'Wrong number of rfc table cluster'
-            assert len(table_clusters - data) == table_size, \
-                'Double allocation in rfc table'
             # Clusters allocated for the refcount table including
-            # last optional one
+            # last optional one for potential l1 growth
             table_clusters_allocated = set(range(table_start, table_start +
                                                  table_size + 1))
             # New refcount blocks necessary for clusters occupied by the
@@ -409,15 +387,12 @@ class Image(object):
                 # Check if the refcount table needs one more cluster
                 if int(ceil((max(blocks) + 1) / float(size))) > table_size:
                     new_block_id = (table_start + table_size) / block_size
-                    # Check if the new last table cluster needs
+                    # Check if the additional table cluster needs
                     # one more refcount block
                     if new_block_id not in blocks:
                         diff.add(new_block_id)
                     table_clusters.add(table_start + table_size)
                     table_size += 1
-                    assert len(table_clusters) == ceil(
-                        (max(blocks) + 1) * 8.0 / self.cluster_size), \
-                        'Wrong number of rfc table cluster'
             return table_clusters, blocks, clusters
 
         def create_table_entry(table_offset, block_cluster, block_size,
@@ -432,13 +407,10 @@ class Image(object):
             entry_size = self.cluster_size / block_size
             offset = block_cluster * self.cluster_size
             entry_offset = offset + entry_size * (cluster % block_size)
-            assert entry_offset < (block_cluster + 1) * self.cluster_size, \
-                'Wrong offset inside block %d %d' \
-                % (entry_offset, (block_cluster + 1)*self.cluster_size)
             # While snapshots are not supported all refcounts are set to 1
             return ['>H',entry_offset, 1, 'refcount_block_entry']
 
-        # Size of a refcount_block entry in bytes
+        # Number of refcount entries per refcount block
         block_size = self.cluster_size / \
                      (1 << self.header['refcount_order'][0].value - 3)
         meta_data = self._get_metadata()
@@ -464,20 +436,16 @@ class Image(object):
                                                        block_size)
             block_clusters |= new_clusters
 
-            assert len(block_clusters) == len(block_ids), \
-                'After table alloc amount of block cluster != num of block' \
-                'ids %d %d'\
-                % (len(block_clusters), len(block_ids))
         meta_data |= block_clusters | table_clusters
-        assert (len(self.data_clusters) != 0 or sorted(meta_data | \
-                                                       self.data_clusters) ==
-                range(4)), \
-            'Wrong amount of clusters for meta data and empty data %s' % (meta_data | self.data_clusters)
         table_offset = min(table_clusters) * self.cluster_size
         block_id = None
+        # Clusters allocated for refcount blocks
         block_clusters = list(block_clusters)
+        # Indices of refcount blocks
         block_ids = list(block_ids)
+        # Refcount table entries
         rfc_table = []
+        # Refcount entries
         rfc_blocks = []
 
         for cluster in sorted(self.data_clusters | meta_data):
@@ -491,11 +459,6 @@ class Image(object):
                                                  cluster))
         self.refcount_table = FieldsList(rfc_table)
         self.refcount_blocks = FieldsList(rfc_blocks)
-        assert len(rfc_table) == len(block_clusters), \
-            'Wrong amount of table entries %d %d' % (len(rfc_table),
-                                                     len(block_clusters))
-        assert len(rfc_blocks) == len(self.data_clusters | meta_data), \
-            'Wrong amount of block entries'
 
         self.header['refcount_table_offset'][0].value = table_offset
         self.header['refcount_table_clusters'][0].value = len(table_clusters)
@@ -521,9 +484,7 @@ class Image(object):
         if fields_to_fuzz is None:
             for field in self:
                 if coin():
-                    print field.name
                     field.value = getattr(fuzz, field.name)(field.value)
-                    print field.value
         else:
             for item in fields_to_fuzz:
                 if len(item) == 1:
@@ -532,20 +493,15 @@ class Image(object):
                             field.value = getattr(fuzz,
                                                   field.name)(field.value)
                 else:
+                    # If fields with the requested name were not generated
+                    # getattr(self, item[0])[item[1]] returns an empty list
                     for field in getattr(self, item[0])[item[1]]:
-                        try:
-                            field.value = getattr(fuzz, field.name)(
-                                field.value)
-                        except AttributeError:
-                            # Some fields can be skipped depending on
-                            # their prerequisites
-                            pass
+                        field.value = getattr(fuzz, field.name)(field.value)
 
     def write(self, filename):
         """Write an entire image to the file."""
         image_file = open(filename, 'w')
         for field in self:
-            print field
             image_file.seek(field.offset)
             image_file.write(struct.pack(field.fmt, field.value))
 
