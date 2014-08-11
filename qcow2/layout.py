@@ -338,8 +338,8 @@ class Image(object):
 
         def create_l1_entry(l2_cluster, l1_offset, guest):
             """Generate one L1 entry."""
-            l1_size = self.cluster_size / UINT64_S
-            entry_offset = l1_offset + UINT64_S * (guest / l1_size)
+            l2_size = self.cluster_size / UINT64_S
+            entry_offset = l1_offset + UINT64_S * (guest / l2_size)
             # While snapshots are not supported bit #63 = 1
             entry_val = (1 << 63) + l2_cluster * self.cluster_size
             return ['>Q', entry_offset, entry_val, 'l1_entry']
