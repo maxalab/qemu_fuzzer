@@ -21,8 +21,10 @@ import struct
 import fuzz
 from math import ceil
 from os import urandom
+from itertools import chain
 
 MAX_IMAGE_SIZE = 10 * (1 << 20)
+MAX_IMAGE_SIZE = 10 * (1 << 12)
 # Standard sizes
 UINT32_S = 4
 UINT64_S = 8
@@ -36,7 +38,7 @@ class Field(object):
     of value necessary for its packing to binary form, an offset from
     the beginning of the image, a value and a name.
 
-    The field can be iterated as a list [format, offset, value].
+    The field can be iterated as a list [format, offset, value, name].
     """
 
     __slots__ = ('fmt', 'offset', 'value', 'name')
@@ -59,8 +61,7 @@ class FieldsList(object):
 
     """List of fields.
 
-    The class allows access to a field in the list by its name and joins
-    several list in one via in-place addition.
+    The class allows access to a field in the list by its name.
     """
 
     def __init__(self, meta_data=None):
@@ -75,9 +76,6 @@ class FieldsList(object):
 
     def __iter__(self):
         return iter(self.data)
-
-    def __add__(self, other):
-        return FieldsList(self.data + other.data)
 
     def __len__(self):
         return len(self.data)
@@ -114,13 +112,9 @@ class Image(object):
         self.bias = random.uniform(0.2, 0.5)
 
     def __iter__(self):
-        return iter(self.header +
-                    self.backing_file_format +
-                    self.feature_name_table +
-                    self.end_of_extension_area +
-                    self.backing_file_name +
-                    self.l1_table +
-                    self.l2_tables)
+        return chain(self.header, self.backing_file_format,
+                     self.feature_name_table, self.end_of_extension_area,
+                     self.backing_file_name, self.l1_table, self.l2_tables)
 
     def create_header(self, cluster_bits, backing_file_name=None):
         """Generate a random valid header."""
@@ -286,8 +280,8 @@ class Image(object):
 
         def create_l1_entry(l2_cluster, l1_offset, guest):
             """Generate one L1 entry."""
-            l1_size = self.cluster_size / UINT64_S
-            entry_offset = l1_offset + UINT64_S * (guest / l1_size)
+            l2_size = self.cluster_size / UINT64_S
+            entry_offset = l1_offset + UINT64_S * (guest / l2_size)
             # While snapshots are not supported bit #63 = 1
             entry_val = (1 << 63) + l2_cluster * self.cluster_size
             return ['>Q', entry_offset, entry_val, 'l1_entry']
@@ -367,14 +361,10 @@ class Image(object):
                             field.value = getattr(fuzz,
                                                   field.name)(field.value)
                 else:
+                    # If fields with the requested name were not generated
+                    # getattr(self, item[0])[item[1]] returns an empty list
                     for field in getattr(self, item[0])[item[1]]:
-                        try:
-                            field.value = getattr(fuzz, field.name)(
-                                field.value)
-                        except AttributeError:
-                            # Some fields can be skipped depending on
-                            # their prerequisites
-                            pass
+                        field.value = getattr(fuzz, field.name)(field.value)
 
     def write(self, filename):
         """Write an entire image to the file."""
