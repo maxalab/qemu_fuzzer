@@ -24,7 +24,6 @@ from os import urandom
 from itertools import chain
 
 MAX_IMAGE_SIZE = 10 * (1 << 20)
-MAX_IMAGE_SIZE = 10 * (1 << 12)
 # Standard sizes
 UINT32_S = 4
 UINT64_S = 8
@@ -91,8 +90,8 @@ class Image(object):
     """
 
     def __init__(self, backing_file_name=None):
-        """Create a random valid qcow2 image with the correct inner structure
-        and allowable values.
+        """Create a random valid qcow2 image with the correct header and stored
+        backing file name.
         """
         cluster_bits, self.image_size = self._size_params()
         self.cluster_size = 1 << cluster_bits
