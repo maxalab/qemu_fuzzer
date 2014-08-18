@@ -510,7 +510,7 @@ class Image(object):
             image_file.seek(cluster * self.cluster_size)
             image_file.write(urandom(self.cluster_size))
 
-        Align the real image size to the cluster size
+        # Align the real image size to the cluster size
         image_file.seek(0, 2)
         size = image_file.tell()
         rounded = (size + self.cluster_size - 1) & ~(self.cluster_size - 1)
