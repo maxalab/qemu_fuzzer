@@ -111,7 +111,7 @@ class Image(object):
         self.data_clusters = self._alloc_data(self.image_size,
                                               self.cluster_size)
         # Percentage of fields will be fuzzed
-        self.bias = random.uniform(0.2, 0.5)
+        self.bias = random.uniform(0.1, 0.5)
 
     def __iter__(self):
         return chain(self.header, self.backing_file_format,
@@ -510,7 +510,7 @@ class Image(object):
             image_file.seek(cluster * self.cluster_size)
             image_file.write(urandom(self.cluster_size))
 
-        # Align the real image size to the cluster size
+        Align the real image size to the cluster size
         image_file.seek(0, 2)
         size = image_file.tell()
         rounded = (size + self.cluster_size - 1) & ~(self.cluster_size - 1)

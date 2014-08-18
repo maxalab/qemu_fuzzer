@@ -25,9 +25,13 @@ import subprocess
 import random
 import shutil
 from itertools import count
+import time
 import getopt
 import StringIO
 import resource
+
+# All formats supported by the 'qemu-img create' command.
+WRITABLE_FORMATS = ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file', 'qed', 'vpc']
 
 try:
     import json
@@ -64,14 +68,35 @@ def run_app(fd, q_args):
     """Start an application with specified arguments and return its exit code
     or kill signal depending on the result of execution.
     """
+
+    class Alarm(Exception):
+        """Exception for signal.alarm events."""
+        pass
+
+    def handler(*args):
+        """Notify that an alarm event occurred."""
+        raise Alarm
+
+    signal.signal(signal.SIGALRM, handler)
+    signal.alarm(300)
+    term_signal = signal.SIGKILL
     devnull = open('/dev/null', 'r+')
     process = subprocess.Popen(q_args, stdin=devnull,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
-    out, err = process.communicate()
-    fd.write(out)
-    fd.write(err)
-    return process.returncode
+    try:
+        out, err = process.communicate()
+        signal.alarm(0)
+        fd.write(out)
+        fd.write(err)
+        fd.flush()
+        return process.returncode
+
+    except Alarm:
+        os.kill(process.pid, term_signal)
+        fd.write('The command was terminated by timeout.\n')
+        fd.flush()
+        return -term_signal
 
 
 class TestException(Exception):
@@ -112,27 +137,60 @@ class TestEnv(object):
         self.init_path = os.getcwd()
         self.work_dir = work_dir
         self.current_dir = os.path.join(work_dir, 'test-' + test_id)
-        self.qemu_img = os.environ.get('QEMU_IMG', 'qemu-img')\
-                                  .strip().split(' ')
+        self.qemu_img = \
+            os.environ.get('QEMU_IMG', 'qemu-img').strip().split(' ')
         self.qemu_io = os.environ.get('QEMU_IO', 'qemu-io').strip().split(' ')
-        self.commands = [['qemu-img', 'check', '-f', 'qcow2', '$test_img'],
-                         ['qemu-img', 'info', '-f', 'qcow2', '$test_img'],
-                         ['qemu-io', '$test_img', '-c', 'read $off $len'],
-                         ['qemu-io', '$test_img', '-c', 'write $off $len'],
-                         ['qemu-io', '$test_img', '-c',
-                          'aio_read $off $len'],
-                         ['qemu-io', '$test_img', '-c',
-                          'aio_write $off $len'],
-                         ['qemu-io', '$test_img', '-c', 'flush'],
-                         ['qemu-io', '$test_img', '-c',
-                          'discard $off $len'],
-                         ['qemu-io', '$test_img', '-c',
-                          'truncate $off']]
-        for fmt in ['raw', 'vmdk', 'vdi', 'cow', 'qcow2', 'file',
-                    'qed', 'vpc']:
+        strings = ['%s%p%x%d', '.1024d', '%.2049d', '%p%p%p%p', '%x%x%x%x',
+                   '%d%d%d%d', '%s%s%s%s', '%99999999999s', '%08x', '%%20d',
+                   '%%20n', '%%20x', '%%20s', '%s%s%s%s%s%s%s%s%s%s',
+                   '%p%p%p%p%p%p%p%p%p%p',
+                   '%#0123456x%08x%x%s%p%d%n%o%u%c%h%l%q%j%z%Z%t%i%e%g%f%a%C' +
+                   '%S%08x%%', '%s x 129', '%x x 257']
+        self.commands = [
+            ['qemu-img', 'check', '-f', 'qcow2', '$test_img'],
+            ['qemu-img', 'check', '-f', 'qcow2', '-r', 'leaks', '$test_img'],
+            ['qemu-img', 'check', '-f', 'qcow2', '-r', 'all', '$test_img'],
+            ['qemu-img', 'snapshot', '-c', 'new', '$test_img'],
+            ['qemu-img', 'info', '-f', 'qcow2', '$test_img'],
+            ['qemu-img', 'convert', '-c', '-f', 'qcow2', '-O', 'qcow2',
+             '$test_img', 'converted_image.qcow2'],
+            ['qemu-img', 'amend', '-o', 'compat=0.10', '-f', 'qcow2',
+             '$test_img'],
+            ['qemu-img', 'amend', '-o', 'lazy_refcounts=on', '-f', 'qcow2',
+             '$test_img'],
+            ['qemu-img', 'amend', '-o', 'lazy_refcounts=off', '-f', 'qcow2',
+             '$test_img'],
+            ['qemu-img', 'amend', '-o',
+             'backing_file=' + random.choice(strings), '-f', 'qcow2',
+             '$test_img'],
+            ['qemu-img', 'amend', '-o', 'backing_fmt=' + random.choice(strings),
+             '-f', 'qcow2', '$test_img'],
+            ['qemu-io', '$test_img', '-c', 'read $off $len'],
+            ['qemu-io', '$test_img', '-c', 'read -p $off $len'],
+            ['qemu-io', '$test_img', '-c', 'write $off $len'],
+            ['qemu-io', '$test_img', '-c', 'write -c $off $len'],
+            ['qemu-io', '$test_img', '-c', 'write -p $off $len'],
+            ['qemu-io', '$test_img', '-c', 'write -z $off $len'],
+            ['qemu-io', '$test_img', '-c', 'aio_read $off $len'],
+            ['qemu-io', '$test_img', '-c', 'aio_write $off $len'],
+            ['qemu-io', '$test_img', '-c', 'flush'],
+            ['qemu-io', '$test_img', '-c', 'discard $off $len'],
+            ['qemu-io', '$test_img', '-c', 'truncate $off'],
+            ['qemu-io', '$test_img', '-c', 'info'],
+            ['qemu-io', '$test_img', '-c', 'map']
+        ]
+
+        for fmt in WRITABLE_FORMATS:
+            cache_opt = random.choice([
+                [], ['-t', 'unsafe'],
+                ['-t', 'writethrough'],
+                ['-t', 'writeback'],
+                ['-t', 'none']
+            ])
+
             self.commands.append(
-                ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt,
-                 '$test_img', 'converted_image.' + fmt])
+                ['qemu-img', 'convert', '-f', 'qcow2', '-O', fmt] + cache_opt +
+                ['$test_img', 'converted_image.' + fmt])
 
         try:
             os.makedirs(self.current_dir)
@@ -155,9 +213,8 @@ class TestEnv(object):
         Format of a backing file is randomly chosen from all formats supported
         by 'qemu-img create'.
         """
-        # All formats supported by the 'qemu-img create' command.
-        backing_file_fmt = random.choice(['raw', 'vmdk', 'vdi', 'cow', 'qcow2',
-                                          'file', 'qed', 'vpc'])
+
+        backing_file_fmt = random.choice(WRITABLE_FORMATS)
         backing_file_name = 'backing_img.' + backing_file_fmt
         backing_file_size = random.randint(MIN_BACKING_FILE_SIZE,
                                            MAX_BACKING_FILE_SIZE) * (1 << 20)
@@ -190,10 +247,8 @@ class TestEnv(object):
 
         os.chdir(self.current_dir)
         backing_file_name, backing_file_fmt = self._create_backing_file()
-        img_size = image_generator.create_image('test.img',
-                                                backing_file_name,
-                                                backing_file_fmt,
-                                                fuzz_config)
+        img_size = image_generator.create_image(
+            'test.img', backing_file_name, backing_file_fmt, fuzz_config)
         for item in commands:
             shutil.copy('test.img', 'copy.img')
             # 'off' and 'len' are multiple of the sector size
@@ -206,7 +261,7 @@ class TestEnv(object):
             elif item[0] == 'qemu-io':
                 current_cmd = list(self.qemu_io)
             else:
-                multilog("Warning: test command '%s' is not defined.\n" \
+                multilog("Warning: test command '%s' is not defined.\n"
                          % item[0], sys.stderr, self.log, self.parent_log)
                 continue
             # Replace all placeholders with their real values
@@ -222,29 +277,30 @@ class TestEnv(object):
                            "Backing file: %s\n" \
                            % (self.seed, " ".join(current_cmd),
                               self.current_dir, backing_file_name)
-
             temp_log = StringIO.StringIO()
             try:
                 retcode = run_app(temp_log, current_cmd)
             except OSError, e:
-                multilog(test_summary + "Error: Start of '%s' failed. " \
-                         "Reason: %s\n\n" % (os.path.basename(
-                             current_cmd[0]), e[1]),
+                multilog(test_summary +
+                         ("Error: Start of '%s' failed. Reason: %s\n\n"
+                          % (os.path.basename(current_cmd[0]), e[1])),
                          sys.stderr, self.log, self.parent_log)
                 raise TestException
 
             if retcode < 0:
                 self.log.write(temp_log.getvalue())
-                multilog(test_summary + "FAIL: Test terminated by signal " +
-                         "%s\n\n" % str_signal(-retcode), sys.stderr, self.log,
-                         self.parent_log)
+                multilog(test_summary +
+                         ("FAIL: Test terminated by signal %s\n\n"
+                          % str_signal(-retcode)),
+                         sys.stderr, self.log, self.parent_log)
                 self.failed = True
             else:
                 if self.log_all:
                     self.log.write(temp_log.getvalue())
-                    multilog(test_summary + "PASS: Application exited with" +
-                             " the code '%d'\n\n" % retcode, sys.stdout,
-                             self.log, self.parent_log)
+                    multilog(test_summary +
+                             ("PASS: Application exited with the code '%d'\n\n"
+                              % retcode),
+                             sys.stdout, self.log, self.parent_log)
             temp_log.close()
             os.remove('copy.img')
 
@@ -264,11 +320,13 @@ if __name__ == '__main__':
 
         Set up test environment in TEST_DIR and run a test in it. A module for
         test image generation should be specified via IMG_GENERATOR.
+
         Example:
-        runner.py -c '[["qemu-img", "info", "$test_img"]]' /tmp/test ../qcow2
+          runner.py -c '[["qemu-img", "info", "$test_img"]]' /tmp/test ../qcow2
 
         Optional arguments:
           -h, --help                    display this help and exit
+          -d, --duration=NUMBER         finish tests after NUMBER of seconds
           -c, --command=JSON            run tests for all commands specified in
                                         the JSON array
           -s, --seed=STRING             seed for a test image generation,
@@ -282,20 +340,22 @@ if __name__ == '__main__':
 
         '--command' accepts a JSON array of commands. Each command presents
         an application under test with all its paramaters as a list of strings,
-        e.g.
-          ["qemu-io", "$test_img", "-c", "write $off $len"]
+        e.g. ["qemu-io", "$test_img", "-c", "write $off $len"].
 
         Supported application aliases: 'qemu-img' and 'qemu-io'.
+
         Supported argument aliases: $test_img for the fuzzed image, $off
         for an offset, $len for length.
 
         Values for $off and $len will be generated based on the virtual disk
-        size of the fuzzed image
+        size of the fuzzed image.
+
         Paths to 'qemu-img' and 'qemu-io' are retrevied from 'QEMU_IMG' and
-        'QEMU_IO' environment variables
+        'QEMU_IO' environment variables.
 
         '--config' accepts a JSON array of fields to be fuzzed, e.g.
-          '[["header"], ["header", "version"]]'
+        '[["header"], ["header", "version"]]'.
+
         Each of the list elements can consist of a complex image element only
         as ["header"] or ["feature_name_table"] or an exact field as
         ["header", "version"]. In the first case random portion of the element
@@ -325,10 +385,15 @@ if __name__ == '__main__':
         finally:
             test.finish()
 
+    def should_continue(duration, start_time):
+        """Return True if a new test can be started and False otherwise."""
+        current_time = int(time.time())
+        return (duration is None) or (current_time - start_time < duration)
+
     try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hs:kv',
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'c:hs:kvd:',
                                        ['command=', 'help', 'seed=', 'config=',
-                                        'keep_passed', 'verbose'])
+                                        'keep_passed', 'verbose', 'duration='])
     except getopt.error, e:
         print >>sys.stderr, \
             "Error: %s\n\nTry 'runner.py --help' for more information" % e
@@ -339,6 +404,7 @@ if __name__ == '__main__':
     log_all = False
     seed = None
     config = None
+    duration = None
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
@@ -357,6 +423,8 @@ if __name__ == '__main__':
             log_all = True
         elif opt in ('-s', '--seed'):
             seed = arg
+        elif opt in ('-d', '--duration'):
+            duration = int(arg)
         elif opt == '--config':
             try:
                 config = json.loads(arg)
@@ -394,9 +462,11 @@ if __name__ == '__main__':
     resource.setrlimit(resource.RLIMIT_CORE, (-1, -1))
     # If a seed is specified, only one test will be executed.
     # Otherwise runner will terminate after a keyboard interruption
-    for test_id in count(1):
+    start_time = int(time.time())
+    test_id = count(1)
+    while should_continue(duration, start_time):
         try:
-            run_test(str(test_id), seed, work_dir, run_log, cleanup,
+            run_test(str(test_id.next()), seed, work_dir, run_log, cleanup,
                      log_all, command, config)
         except (KeyboardInterrupt, SystemExit):
             sys.exit(1)

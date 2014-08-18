@@ -17,7 +17,7 @@
 #
 
 import random
-
+from sys import maxint as INT_MAX
 
 UINT8 = 0xff
 UINT16 = 0xffff
@@ -26,16 +26,21 @@ UINT64 = 0xffffffffffffffff
 # Most significant bit orders
 UINT32_M = 31
 UINT64_M = 63
+# Sizes
+UINT64_S = 8
 # Fuzz vectors
-UINT8_V = [0, 0x10, UINT8/4, UINT8/2 - 1, UINT8/2, UINT8/2 + 1, UINT8 - 1,
+UINT8_V = [0, 1, 0x10, UINT8/4, UINT8/2 - 1, UINT8/2, UINT8/2 + 1, UINT8 - 1,
            UINT8]
-UINT16_V = [0, 0x100, 0x1000, UINT16/4, UINT16/2 - 1, UINT16/2, UINT16/2 + 1,
-            UINT16 - 1, UINT16]
-UINT32_V = [0, 0x100, 0x1000, 0x10000, 0x100000, UINT32/4, UINT32/2 - 1,
-            UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32]
-UINT64_V = UINT32_V + [0x1000000, 0x10000000, 0x100000000, UINT64/4,
-                       UINT64/2 - 1, UINT64/2, UINT64/2 + 1, UINT64 - 1,
-                       UINT64]
+UINT16_V = [0, 1, 0x100, 0x1000, UINT16/4, UINT16/2 - 1, UINT16/2,
+            UINT16/2 + 1, UINT16 - 1, UINT16]
+UINT32_V = UINT16_V + [UINT16 + 1, UINT16 + 2, 0x10000, 0x100000,
+                       0x1000000, 0x10000000, UINT32/4, UINT32/2 - 1,
+                       UINT32/2, UINT32/2 + 1, UINT32 - 1, UINT32]
+# Exclude the vector of 16 bit values
+UINT64_V = UINT32_V[len(UINT16_V):] + \
+           [0, 1, UINT32 + 1, UINT32 + 2, 0x100000000, INT_MAX/UINT64_S - 1,
+            INT_MAX / UINT64_S, INT_MAX/UINT64_S + 1, UINT64/4,
+            UINT64/2 - 1, UINT64/2, UINT64/2 + 1, UINT64 - 1, UINT64]
 STRING_V = ['%s%p%x%d', '.1024d', '%.2049d', '%p%p%p%p', '%x%x%x%x',
             '%d%d%d%d', '%s%s%s%s', '%99999999999s', '%08x', '%%20d', '%%20n',
             '%%20x', '%%20s', '%s%s%s%s%s%s%s%s%s%s', '%p%p%p%p%p%p%p%p%p%p',
@@ -118,13 +123,17 @@ def string_validator(current, strings):
     return validator(current, random.choice, strings)
 
 
-def selector(current, constraints, validate=int_validator):
+def selector(current, constraints, validate=None):
     """Select one value from all defined by constraints.
 
     Each constraint produces one random value satisfying to it. The function
     randomly selects one value satisfying at least one constraint (depending on
     constraints overlaps).
     """
+
+    if validate is None:
+        validate = int_validator
+
     def iter_validate(c):
         """Apply validate() only to constraints represented as lists.
 
@@ -136,33 +145,22 @@ def selector(current, constraints, validate=int_validator):
         else:
             return c
 
-    fuzz_values = [iter_validate(c) for c in constraints]
-    # Remove current for cases it's implicitly specified in constraints
-    # Duplicate validator functionality to prevent decreasing of probability
-    # to get one of allowable values
-    # TODO: remove validators after implementation of intelligent selection
-    # of fields will be fuzzed
-    try:
-        fuzz_values.remove(current)
-    except ValueError:
-        pass
+    v_constraints = [x for x in constraints if x != current]
+    fuzz_values = [iter_validate(c) for c in v_constraints]
     return random.choice(fuzz_values)
 
 
 def magic(current):
-    """Fuzz magic header field.
-
-    The function just returns the current magic value and provides uniformity
-    of calls for all fuzzing functions.
-    """
-    return current
+    """Fuzz magic header field."""
+    constraints = ['VMDK', 'QED', '', 'OOOM'] + \
+                  [truncate_string(STRING_V, len(current))]
+    return selector(current, constraints, string_validator)
 
 
 def version(current):
     """Fuzz version header field."""
     constraints = UINT32_V + [
-        [(2, 3)],  # correct values
-        [(0, 1), (4, UINT32)]
+        [(0, 4)]  # includes valid values
     ]
     return selector(current, constraints)
 
@@ -196,16 +194,18 @@ def size(current):
 
 def crypt_method(current):
     """Fuzz crypt method header field."""
-    constraints = UINT32_V + [
-        1,
-        [(2, UINT32)]
-    ]
+    # UINT32_V includes valid values [0, 1]
+    constraints = UINT32_V
     return selector(current, constraints)
 
 
 def l1_size(current):
     """Fuzz L1 table size header field."""
-    constraints = UINT32_V
+    # QCOW_MAX_L1_SIZE = 0x2000000
+    max_size = 0x2000000 / UINT64_S
+    constraints = UINT32_V + \
+                  [max_size - 1, max_size, max_size + 1] + \
+                  [[(0, current + 1)]]
     return selector(current, constraints)
 
 
@@ -223,12 +223,18 @@ def refcount_table_offset(current):
 
 def refcount_table_clusters(current):
     """Fuzz refcount table clusters header field."""
-    constraints = UINT32_V
+    # QCOW_MAX_REFTABLE_SIZE = 0x800000, MIN_CLUSTER_BITS = 9 =>
+    # max size of reftable in clusters = 1 << 14
+    max_size = 1 << 14
+    constraints = UINT32_V + \
+                  [max_size - 1, max_size, max_size + 1] + \
+                  [[(0, current + 1)]]
     return selector(current, constraints)
 
 
 def nb_snapshots(current):
     """Fuzz number of snapshots header field."""
+    # QCOW_MAX_SNAPSHOTS = 1 << 16, included in UINT32_V
     constraints = UINT32_V
     return selector(current, constraints)
 
@@ -274,8 +280,7 @@ def header_length(current):
     """Fuzz number of refcount order header field."""
     constraints = UINT32_V + [
         72,
-        104,
-        [(0, UINT32)]
+        104
     ]
     return selector(current, constraints)
 
@@ -335,9 +340,8 @@ def l1_entry(current):
     constraints = UINT64_V
     # Reserved bits are ignored
     # Added a possibility when only flags are fuzzed
-    offset = 0x7fffffffffffffff & random.choice([selector(current,
-                                                          constraints),
-                                                 current])
+    offset = 0x7fffffffffffffff & \
+             random.choice([selector(current, constraints), current])
     is_cow = random.randint(0, 1)
     return offset + (is_cow << UINT64_M)
 
@@ -347,9 +351,8 @@ def l2_entry(current):
     constraints = UINT64_V
     # Reserved bits are ignored
     # Add a possibility when only flags are fuzzed
-    offset = 0x3ffffffffffffffe & random.choice([selector(current,
-                                                          constraints),
-                                                 current])
+    offset = 0x3ffffffffffffffe & \
+             random.choice([selector(current, constraints), current])
     is_compressed = random.randint(0, 1)
     is_cow = random.randint(0, 1)
     is_zero = random.randint(0, 1)
